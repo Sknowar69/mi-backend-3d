@@ -53,7 +53,7 @@ app.use(express.json());
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // <-- Llave Secreta para Admin
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Llave Secreta para Admin
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('ERROR CRÍTICO: Falta SUPABASE_URL o SUPABASE_ANON_KEY en las variables de entorno.');
@@ -71,7 +71,7 @@ const supabaseAdmin = (supabaseUrl && supabaseServiceKey) ? createClient(supabas
 
 
 // ============================================================================
-// 1. ENDPOINT PÚBLICO (Vista del Cliente)
+// 1. ENDPOINT PÚBLICO (Vista del Cliente) -> ¡CORREGIDO CON TU SINTAXIS ORIGINAL! 🎯
 // ============================================================================
 
 /**
@@ -92,6 +92,7 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
   }
 
   try {
+    // Restaurada tu consulta exacta con el .setHeader para saltar de forma segura el RLS público
     const { data: proyecto, error } = await supabase
       .from('proyectos')
       .select(`
@@ -107,6 +108,7 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
         )
       `)
       .eq('codigo_seguimiento', codigo.toUpperCase())
+      .setHeader('X-Codigo-Seguimiento', codigo.toUpperCase()) // <-- ¡Esta es la línea mágica que faltaba!
       .maybeSingle();
 
     if (error) {
@@ -149,12 +151,12 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
 
 
 // ============================================================================
-// 2. ENDPOINTS PRIVADOS (Panel de Administración) -> Usan supabaseAdmin 🚀
+// 2. ENDPOINTS PRIVADOS (Panel de Administración) -> Usan supabaseAdmin
 // ============================================================================
 
 /**
  * GET /api/admin/proyectos
- * Lista todos los proyectos ordenados por su lugar en la fila. (Salta RLS de forma segura)
+ * Lista todos los proyectos ordenados por su lugar en la fila.
  */
 app.get('/api/admin/proyectos', async (req, res) => {
   if (!supabaseAdmin) {
@@ -162,7 +164,6 @@ app.get('/api/admin/proyectos', async (req, res) => {
   }
 
   try {
-    // Usamos supabaseAdmin para traer la lista completa sin bloqueos
     const { data: proyectos, error } = await supabaseAdmin
       .from('proyectos')
       .select(`
