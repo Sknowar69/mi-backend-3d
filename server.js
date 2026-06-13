@@ -48,20 +48,27 @@ app.use(cors({
 app.use(express.json());
 
 // ============================================================================
-// INICIALIZACIÓN DEL CLIENTE DE SUPABASE
+// INICIALIZACIÓN DE LOS CLIENTES DE SUPABASE
 // ============================================================================
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // <-- Llave Secreta para Admin
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('ERROR CRÍTICO: Falta SUPABASE_URL o SUPABASE_ANON_KEY en las variables de entorno.');
-  // No detenemos el servidor en producción de inmediato para evitar reinicios infinitos, 
-  // pero responderemos con error en las peticiones.
 }
 
-// Conector oficial a tu base de datos de Supabase
+if (!supabaseServiceKey) {
+  console.warn('ADVERTENCIA: Falta SUPABASE_SERVICE_ROLE_KEY. Las funciones de administración global fallarán.');
+}
+
+// 1. Conector Público Estándar (Usa la Anon Key y respeta RLS)
 const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+// 2. Conector Maestro de Administración (Usa la Service Role Key y salta RLS)
+const supabaseAdmin = (supabaseUrl && supabaseServiceKey) ? createClient(supabaseUrl, supabaseServiceKey) : null;
+
 
 // ============================================================================
 // 1. ENDPOINT PÚBLICO (Vista del Cliente)
@@ -78,7 +85,6 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
     return res.status(500).json({ error: 'La conexión con Supabase no está configurada.' });
   }
 
-  // Comprobar que el código sea válido
   if (!codigo || codigo.length !== 5) {
     return res.status(400).json({ 
       error: 'El código de seguimiento debe tener exactamente 5 caracteres.' 
@@ -86,7 +92,6 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
   }
 
   try {
-    // Pedimos a Supabase el proyecto junto con su tipo de proyecto
     const { data: proyecto, error } = await supabase
       .from('proyectos')
       .select(`
@@ -102,7 +107,6 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
         )
       `)
       .eq('codigo_seguimiento', codigo.toUpperCase())
-      .setHeader('X-Codigo-Seguimiento', codigo.toUpperCase()) // <-- ¡Sintaxis correcta!
       .maybeSingle();
 
     if (error) {
@@ -116,20 +120,16 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
       });
     }
 
-    // --- CÁLCULO DE LA FECHA DE ENTREGA ---
-    // Fórmula: Fecha Inicio + (Posición en Cola * Tiempo Base del Tipo) + 2 días de colchón
     const tiempoBase = proyecto.tipos_proyecto?.tiempo_estimado_base || 0;
     const posicionCola = proyecto.posicion_cola || 0;
     const diasTotales = (posicionCola * tiempoBase) + 2;
 
-    // Si aún no ha iniciado, estimamos desde la fecha en que se registró (creado_en)
     const fechaReferenciaStr = proyecto.fecha_inicio || proyecto.creado_en;
     const fechaReferencia = new Date(fechaReferenciaStr);
     
     const fechaEstimada = new Date(fechaReferencia.getTime());
     fechaEstimada.setDate(fechaEstimada.getDate() + diasTotales);
 
-    // Devolvemos la información bonita para el cliente
     return res.status(200).json({
       nombre_cliente: proyecto.nombre_cliente,
       tipo_proyecto: proyecto.tipos_proyecto?.nombre || 'No definido',
@@ -147,21 +147,23 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
   }
 });
 
+
 // ============================================================================
-// 2. ENDPOINTS PRIVADOS (Panel de Administración)
+// 2. ENDPOINTS PRIVADOS (Panel de Administración) -> Usan supabaseAdmin 🚀
 // ============================================================================
 
 /**
  * GET /api/admin/proyectos
- * Lista todos los proyectos ordenados por su lugar en la fila.
+ * Lista todos los proyectos ordenados por su lugar en la fila. (Salta RLS de forma segura)
  */
 app.get('/api/admin/proyectos', async (req, res) => {
-  if (!supabase) {
-    return res.status(500).json({ error: 'La conexión con Supabase no está configurada.' });
+  if (!supabaseAdmin) {
+    return res.status(500).json({ error: 'El conector maestro de administración no está configurado.' });
   }
 
   try {
-    const { data: proyectos, error } = await supabase
+    // Usamos supabaseAdmin para traer la lista completa sin bloqueos
+    const { data: proyectos, error } = await supabaseAdmin
       .from('proyectos')
       .select(`
         *,
@@ -176,8 +178,8 @@ app.get('/api/admin/proyectos', async (req, res) => {
 
     return res.status(200).json(proyectos);
   } catch (err) {
-    console.error('Error:', err.message);
-    return res.status(500).json({ error: 'Error al obtener la lista de proyectos.' });
+    console.error('Error de Administración:', err.message);
+    return res.status(500).json({ error: 'Error al obtener la lista global de proyectos.' });
   }
 });
 
@@ -188,8 +190,8 @@ app.get('/api/admin/proyectos', async (req, res) => {
 app.post('/api/admin/proyectos', async (req, res) => {
   const { nombre_cliente, tipo_proyecto_id, posicion_cola, notas_internas, fecha_inicio } = req.body;
 
-  if (!supabase) {
-    return res.status(500).json({ error: 'La conexión con Supabase no está configurada.' });
+  if (!supabaseAdmin) {
+    return res.status(500).json({ error: 'El conector maestro de administración no está configurado.' });
   }
 
   if (!nombre_cliente || !tipo_proyecto_id || posicion_cola === undefined) {
@@ -199,7 +201,7 @@ app.post('/api/admin/proyectos', async (req, res) => {
   }
 
   try {
-    const { data: nuevo, error } = await supabase
+    const { data: nuevo, error } = await supabaseAdmin
       .from('proyectos')
       .insert([
         { 
@@ -234,8 +236,8 @@ app.put('/api/admin/proyectos/:id/progreso', async (req, res) => {
   const { id } = req.params;
   const { porcentaje_estado } = req.body;
 
-  if (!supabase) {
-    return res.status(500).json({ error: 'La conexión con Supabase no está configurada.' });
+  if (!supabaseAdmin) {
+    return res.status(500).json({ error: 'El conector maestro de administración no está configurado.' });
   }
 
   const estadosValidos = [0, 25, 50, 75, 100];
@@ -246,7 +248,7 @@ app.put('/api/admin/proyectos/:id/progreso', async (req, res) => {
   }
 
   try {
-    const { data: actualizado, error } = await supabase
+    const { data: actualizado, error } = await supabaseAdmin
       .from('proyectos')
       .update({ porcentaje_estado })
       .eq('id', id)
