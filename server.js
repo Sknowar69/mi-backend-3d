@@ -5,6 +5,9 @@
  * ============================================================================
  */
 
+// Forzar a Node.js a priorizar IPv4 sobre IPv6 para evitar fallos de conexión (fetch failed) en la nube
+const dns = require('node:dns');
+dns.setDefaultResultOrder('ipv4first');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
