@@ -99,7 +99,7 @@ app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
         )
       `)
       .eq('codigo_seguimiento', codigo.toUpperCase())
-      .headers({ 'X-Codigo-Seguimiento': codigo.toUpperCase() })
+      .setHeader('X-Codigo-Seguimiento', codigo.toUpperCase()) // <-- ¡Sintaxis correcta!
       .maybeSingle();
 
     if (error) {
