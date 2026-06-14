@@ -1,33 +1,25 @@
 /**
  * ============================================================================
- * SERVIDOR EXPRESS - PLATAFORMA DE SEGUIMIENTO DE PROYECTOS 3D
- * Backend ligero, seguro y optimizado con integración directa a Supabase.
+ * SERVIDOR EXPRESS - ORGAPROP BACKEND ENGINE v1.2
+ * Plataforma SaaS de Seguimiento de Proyectos 3D con Checklist Dinámico
  * ============================================================================
  */
 
-// Forzar a Node.js a priorizar IPv4 sobre IPv6 para evitar fallos de conexión (fetch failed) en la nube
 const dns = require('node:dns');
-dns.setDefaultResultOrder('ipv4first');
+dns.setDefaultResultOrder('ipv4first'); // Priorizar IPv4 para evitar fallas en Render
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-// Inicialización de Express
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ============================================================================
-// CONFIGURACIÓN DE MIDDLEWARES Y SEGURIDAD
-// ============================================================================
-
-// Helmet protege los headers HTTP de tu servidor en la nube
 app.use(helmet());
 
-// Configuración de CORS segura usando la variable de entorno FRONTEND_URL
 const allowedOrigins = [
-  process.env.FRONTEND_URL || '*', // Por defecto permite a cualquiera si no se configura
+  process.env.FRONTEND_URL || '*',
   'http://localhost:5173',
   'http://localhost:3000'
 ];
@@ -44,237 +36,269 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Codigo-Seguimiento']
 }));
 
-// Permitir al servidor recibir y entender texto en formato JSON
 app.use(express.json());
-
-// ============================================================================
-// INICIALIZACIÓN DE LOS CLIENTES DE SUPABASE
-// ============================================================================
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Llave Secreta para Admin
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('ERROR CRÍTICO: Falta SUPABASE_URL o SUPABASE_ANON_KEY en las variables de entorno.');
-}
-
-if (!supabaseServiceKey) {
-  console.warn('ADVERTENCIA: Falta SUPABASE_SERVICE_ROLE_KEY. Las funciones de administración global fallarán.');
-}
-
-// 1. Conector Público Estándar (Usa la Anon Key y respeta RLS)
 const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
-
-// 2. Conector Maestro de Administración (Usa la Service Role Key y salta RLS)
 const supabaseAdmin = (supabaseUrl && supabaseServiceKey) ? createClient(supabaseUrl, supabaseServiceKey) : null;
 
-
 // ============================================================================
-// 1. ENDPOINT PÚBLICO (Vista del Cliente) -> ¡CORREGIDO CON TU SINTAXIS ORIGINAL! 🎯
+// 1. ENDPOINT PÚBLICO (Vista del Consumidor Final / Tracker en index.html)
 // ============================================================================
 
-/**
- * GET /api/proyectos/seguimiento/:codigo
- * Ruta pública para buscar un proyecto por su código único de 5 letras/números.
- */
 app.get('/api/proyectos/seguimiento/:codigo', async (req, res) => {
   const { codigo } = req.params;
 
-  if (!supabase) {
-    return res.status(500).json({ error: 'La conexión con Supabase no está configurada.' });
-  }
-
+  if (!supabase) return res.status(500).json({ error: 'Supabase no configurado.' });
   if (!codigo || codigo.length !== 5) {
-    return res.status(400).json({ 
-      error: 'El código de seguimiento debe tener exactamente 5 caracteres.' 
-    });
+    return res.status(400).json({ error: 'El código de seguimiento debe tener 5 caracteres.' });
   }
 
   try {
-    // Restaurada tu consulta exacta con el .setHeader para saltar de forma segura el RLS público
-    const { data: proyecto, error } = await supabase
+    // 1. Obtener los datos básicos del proyecto
+    const { data: proyecto, error: pError } = await supabase
       .from('proyectos')
       .select(`
-        id,
-        nombre_cliente,
-        posicion_cola,
-        porcentaje_estado,
-        fecha_inicio,
-        creado_en,
-        tipos_proyecto (
-          nombre,
-          tiempo_estimado_base
-        )
+        id, nombre_cliente, posicion_cola, porcentaje_estado, fecha_inicio, creado_en,
+        tipos_proyecto ( nombre, tiempo_estimado_base )
       `)
       .eq('codigo_seguimiento', codigo.toUpperCase())
-      .setHeader('X-Codigo-Seguimiento', codigo.toUpperCase()) // <-- ¡Esta es la línea mágica que faltaba!
+      .setHeader('X-Codigo-Seguimiento', codigo.toUpperCase())
       .maybeSingle();
 
-    if (error) {
-      console.error('Error en Supabase:', error.message);
-      return res.status(500).json({ error: 'Error al consultar la base de datos.' });
-    }
+    if (pError) throw pError;
+    if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado.' });
 
-    if (!proyecto) {
-      return res.status(404).json({ 
-        error: 'No encontramos ningún proyecto con ese código de seguimiento.' 
-      });
-    }
+    // 2. Obtener el checklist dinámico detallado para que el cliente vea en qué paso van
+    const { data: checklist, error: cError } = await supabase
+      .from('checklist_proyecto')
+      .select('nombre_paso, tiempo_horas, completado, orden_posicion')
+      .eq('proyecto_id', proyecto.id)
+      .order('orden_posicion', { ascending: true });
 
+    if (cError) throw cError;
+
+    // Cálculo de tiempos de entrega estimados basados en tu lógica original
     const tiempoBase = proyecto.tipos_proyecto?.tiempo_estimado_base || 0;
-    const posicionCola = proyecto.posicion_cola || 0;
-    const diasTotales = (posicionCola * tiempoBase) + 2;
-
-    const fechaReferenciaStr = proyecto.fecha_inicio || proyecto.creado_en;
-    const fechaReferencia = new Date(fechaReferenciaStr);
-    
+    const diasTotales = (proyecto.posicion_cola * tiempoBase) + 2;
+    const fechaReferencia = new Date(proyecto.fecha_inicio || proyecto.creado_en);
     const fechaEstimada = new Date(fechaReferencia.getTime());
     fechaEstimada.setDate(fechaEstimada.getDate() + diasTotales);
 
     return res.status(200).json({
       nombre_cliente: proyecto.nombre_cliente,
-      tipo_proyecto: proyecto.tipos_proyecto?.nombre || 'No definido',
+      tipo_proyecto: proyecto.tipos_proyecto?.nombre || 'Custom Prop',
       posicion_cola: proyecto.posicion_cola,
       porcentaje_estado: proyecto.porcentaje_estado,
       fecha_inicio: proyecto.fecha_inicio,
-      fecha_entrega_estimada: fechaEstimada.toISOString()
+      fecha_entrega_estimada: fechaEstimada.toISOString(),
+      checklist: checklist || [] // Enviamos el listado de pasos al index de consulta
     });
 
   } catch (err) {
-    console.error('Error general:', err.message);
-    return res.status(500).json({ 
-      error: 'Hubo un error inesperado al procesar la solicitud.' 
-    });
+    console.error(err.message);
+    return res.status(500).json({ error: 'Error interno en el servidor maestro.' });
   }
 });
 
-
 // ============================================================================
-// 2. ENDPOINTS PRIVADOS (Panel de Administración) -> Usan supabaseAdmin
+// 2. ENDPOINTS DE ADMINISTRACIÓN INTERNA (cliente.html // Usan supabaseAdmin)
 // ============================================================================
 
 /**
- * GET /api/admin/proyectos
- * Lista todos los proyectos ordenados por su lugar en la fila.
+ * POST /api/admin/productos-base
+ * Registra una nueva plantilla de producto con sus pasos dinámicos organizados
  */
-app.get('/api/admin/proyectos', async (req, res) => {
-  if (!supabaseAdmin) {
-    return res.status(500).json({ error: 'El conector maestro de administración no está configurado.' });
+app.post('/api/admin/productos-base', async (req, res) => {
+  const { nombre, pasos } = req.body; // 'pasos' debe ser un array: [{ nombre_paso, tiempo_horas }]
+
+  if (!supabaseAdmin) return res.status(500).json({ error: 'Lector maestro no configurado.' });
+  if (!nombre || !Array.isArray(pasos) || pasos.length === 0) {
+    return res.status(400).json({ error: 'Faltan campos obligatorios o el checklist viene vacío.' });
   }
 
   try {
+    // 1. Insertar la cabecera del producto maestro
+    const { data: producto, error: pError } = await supabaseAdmin
+      .from('productos_base')
+      .insert([{ nombre }])
+      .select()
+      .single();
+
+    if (pError) throw pError;
+
+    // 2. Preparar e insertar las filas de sus pasos operacionales
+    const pasosInsertar = pasos.map((p, idx) => ({
+      producto_base_id: producto.id,
+      nombre_paso: p.nombre_paso,
+      tiempo_horas: Number(p.tiempo_horas) || 1,
+      orden_posicion: idx + 1
+    }));
+
+    const { error: stepsError } = await supabaseAdmin
+      .from('pasos_producto_base')
+      .insert(pasosInsertar);
+
+    if (stepsError) throw stepsError;
+
+    return res.status(201).json({ mensaje: '¡Fórmula de producto guardada en la nube!', producto });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/admin/productos-base
+ * Trae todo el catálogo de fórmulas disponibles
+ */
+app.get('/api/admin/productos-base', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('productos_base')
+      .select('*, pasos_producto_base(*)');
+    if (error) throw error;
+    return res.status(200).json(data);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/admin/proyectos
+ * Lista la cola de proyectos activos incluyendo el desglose de su checklist
+ */
+app.get('/api/admin/proyectos', async (req, res) => {
+  try {
     const { data: proyectos, error } = await supabaseAdmin
       .from('proyectos')
-      .select(`
-        *,
-        tipos_proyecto (
-          nombre,
-          tiempo_estimado_base
-        )
-      `)
+      .select('*, tipos_proyecto(nombre), checklist_proyecto(*)')
       .order('posicion_cola', { ascending: true });
 
     if (error) throw error;
-
     return res.status(200).json(proyectos);
   } catch (err) {
-    console.error('Error de Administración:', err.message);
-    return res.status(500).json({ error: 'Error al obtener la lista global de proyectos.' });
+    return res.status(500).json({ error: err.message });
   }
 });
 
 /**
  * POST /api/admin/proyectos
- * Agrega un nuevo proyecto a la fila.
+ * Lanza un cliente a la cola y duplica el checklist del molde seleccionado
  */
 app.post('/api/admin/proyectos', async (req, res) => {
-  const { nombre_cliente, tipo_proyecto_id, posicion_cola, notas_internas, fecha_inicio } = req.body;
-
-  if (!supabaseAdmin) {
-    return res.status(500).json({ error: 'El conector maestro de administración no está configurado.' });
-  }
-
-  if (!nombre_cliente || !tipo_proyecto_id || posicion_cola === undefined) {
-    return res.status(400).json({ 
-      error: 'Faltan datos obligatorios (nombre_cliente, tipo_proyecto_id, posicion_cola).' 
-    });
-  }
+  const { nombre_cliente, tipo_proyecto_id, posicion_cola, producto_base_id, fecha_inicio, notas_internas } = req.body;
 
   try {
-    const { data: nuevo, error } = await supabaseAdmin
+    // 1. Crear el proyecto principal en la cola
+    const { data: proyecto, error: pError } = await supabaseAdmin
       .from('proyectos')
-      .insert([
-        { 
-          nombre_cliente, 
-          tipo_proyecto_id, 
-          posicion_cola, 
-          porcentaje_estado: 0, 
-          notas_internas, 
-          fecha_inicio: fecha_inicio || null
-        }
-      ])
+      .insert([{
+        nombre_cliente,
+        tipo_proyecto_id,
+        posicion_cola: Number(posicion_cola),
+        fecha_inicio: fecha_inicio || null,
+        notas_internas,
+        porcentaje_estado: 0
+      }])
       .select()
       .single();
 
-    if (error) throw error;
+    if (pError) throw pError;
 
-    return res.status(201).json({
-      mensaje: '¡Proyecto creado con éxito!',
-      proyecto: nuevo
-    });
+    // 2. Buscar los pasos del Producto Maestro seleccionado para clonárselos al cliente
+    const { data: pasosBase, error: pbError } = await supabaseAdmin
+      .from('pasos_producto_base')
+      .select('*')
+      .eq('producto_base_id', producto_base_id)
+      .order('orden_posicion', { ascending: true });
+
+    if (pbError) throw pbError;
+
+    // 3. Si el molde tiene pasos establecidos, se insertan en su checklist personalizado
+    if (pasosBase && pasosBase.length > 0) {
+      const checklistClonado = pasosBase.map(pb => ({
+        proyecto_id: proyecto.id,
+        nombre_paso: pb.nombre_paso,
+        tiempo_horas: pb.tiempo_horas,
+        orden_posicion: pb.orden_posicion,
+        completado: false
+      }));
+
+      const { error: checkError } = await supabaseAdmin
+        .from('checklist_proyecto')
+        .insert(checklistClonado);
+
+      if (checkError) throw checkError;
+    }
+
+    return res.status(201).json({ mensaje: 'Proyecto en cola con checklist activo.', proyecto });
   } catch (err) {
-    console.error('Error:', err.message);
-    return res.status(500).json({ error: 'No se pudo crear el proyecto.' });
+    console.error(err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
 /**
- * PUT /api/admin/proyectos/:id/progreso
- * Cambia el estado del progreso (0, 25, 50, 75 o 100%).
+ * PUT /api/admin/checklist/:stepId
+ * Cambia el estado de un checklist y recalcula matemáticamente el porcentaje real del proyecto
  */
-app.put('/api/admin/proyectos/:id/progreso', async (req, res) => {
-  const { id } = req.params;
-  const { porcentaje_estado } = req.body;
-
-  if (!supabaseAdmin) {
-    return res.status(500).json({ error: 'El conector maestro de administración no está configurado.' });
-  }
-
-  const estadosValidos = [0, 25, 50, 75, 100];
-  if (!estadosValidos.includes(porcentaje_estado)) {
-    return res.status(400).json({ 
-      error: 'El estado debe ser uno de estos números: 0, 25, 50, 75 o 100.' 
-    });
-  }
+app.put('/api/admin/checklist/:stepId', async (req, res) => {
+  const { stepId } = req.params;
+  const { completado } = req.body; // true o false
 
   try {
-    const { data: actualizado, error } = await supabaseAdmin
-      .from('proyectos')
-      .update({ porcentaje_estado })
-      .eq('id', id)
+    // 1. Actualizar el paso específico
+    const { data: pasoActualizado, error: stepError } = await supabaseAdmin
+      .from('checklist_proyecto')
+      .update({ completado })
+      .eq('id', stepId)
       .select()
       .single();
 
-    if (error) throw error;
+    if (stepError) throw stepError;
+    
+    const proyectoId = pasoActualizado.proyecto_id;
 
-    if (!actualizado) {
-      return res.status(404).json({ error: 'El proyecto que buscas no existe.' });
-    }
+    // 2. Traer todos los pasos del mismo proyecto para sacar el promedio ponderado de horas
+    const { data: todosLosPasos, error: queryError } = await supabaseAdmin
+      .from('checklist_proyecto')
+      .select('*')
+      .eq('proyecto_id', proyectoId);
+
+    if (queryError) throw queryError;
+
+    // 3. Algoritmo de efectividad dinámico basado en tiempo real
+    const tiempoTotal = todosLosPasos.reduce((acc, p) => acc + p.tiempo_horas, 0);
+    const tiempoCompletado = todosLosPasos.filter(p => p.completado).reduce((acc, p) => acc + p.tiempo_horas, 0);
+    
+    const nuevoPorcentaje = tiempoTotal > 0 ? Math.round((tiempoCompletado / tiempoTotal) * 100) : 0;
+
+    // 4. Inyectar el porcentaje calculado directo en la tabla de proyectos
+    const { data: proyectoFinal, error: updateError } = await supabaseAdmin
+      .from('proyectos')
+      .update({ porcentaje_estado: nuevoPorcentaje })
+      .eq('id', proyectoId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
 
     return res.status(200).json({
-      mensaje: '¡Progreso actualizado!',
-      proyecto: actualizado
+      mensaje: 'Progreso sincronizado',
+      nuevoPorcentaje,
+      proyecto: proyectoFinal
     });
+
   } catch (err) {
-    console.error('Error:', err.message);
-    return res.status(500).json({ error: 'Error al cambiar el progreso.' });
+    console.error(err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
-// ============================================================================
-// INICIO DEL SERVIDOR
-// ============================================================================
 app.listen(PORT, () => {
-  console.log(`Servidor escuchando en el puerto ${PORT}`);
+  console.log(`Servidor de OrgaProp corriendo en puerto ${PORT}`);
 });
