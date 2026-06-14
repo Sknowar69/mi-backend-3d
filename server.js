@@ -299,6 +299,74 @@ app.put('/api/admin/checklist/:stepId', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/admin/checklist/paso-extra
+ * Añade una operación especial o paso imprevisto a un proyecto que ya está en producción
+ */
+app.post('/api/admin/checklist/paso-extra', async (req, res) => {
+  const { proyecto_id, nombre_paso, tiempo_horas } = req.body;
+
+  if (!supabaseAdmin) return res.status(500).json({ error: 'Lector maestro no configurado.' });
+  if (!proyecto_id || !nombre_paso || !tiempo_horas) {
+    return res.status(400).json({ error: 'Faltan parámetros para inyectar la operación.' });
+  }
+
+  try {
+    // 1. Averiguar cuántos pasos tiene ya el proyecto para asignarle la posición final correlativa
+    const { data: pasosActuales, error: qError } = await supabaseAdmin
+      .from('checklist_proyecto')
+      .select('orden_posicion')
+      .eq('proyecto_id', proyecto_id);
+
+    if (qError) throw qError;
+    const siguientePosicion = pasosActuales.length + 1;
+
+    // 2. Insertar el nuevo paso personalizado en el checklist vivo de ese cliente
+    const { error: insertError } = await supabaseAdmin
+      .from('checklist_proyecto')
+      .insert([{
+        proyecto_id,
+        nombre_paso: nombre_paso,
+        tiempo_horas: Number(tiempo_horas),
+        orden_posicion: siguientePosicion,
+        completado: false
+      }]);
+
+    if (insertError) throw insertError;
+
+    // 3. Volver a consultar todos los pasos (incluyendo el nuevo) para recalcular el porcentaje dinámico real
+    const { data: todosLosPasos, error: queryError } = await supabaseAdmin
+      .from('checklist_proyecto')
+      .select('*')
+      .eq('proyecto_id', proyecto_id);
+
+    if (queryError) throw queryError;
+
+    const tiempoTotal = todosLosPasos.reduce((acc, p) => acc + p.tiempo_horas, 0);
+    const tiempoCompletado = todosLosPasos.filter(p => p.completado).reduce((acc, p) => acc + p.tiempo_horas, 0);
+    const nuevoPorcentaje = tiempoTotal > 0 ? Math.round((tiempoCompletado / tiempoTotal) * 100) : 0;
+
+    // 4. Actualizar la cabecera del proyecto con su nueva efectividad
+    const { data: proyectoActualizado, error: updateError } = await supabaseAdmin
+      .from('proyectos')
+      .update({ porcentaje_estado: nuevoPorcentaje })
+      .eq('id', proyecto_id)
+      .select('*, tipos_proyecto(nombre), checklist_proyecto(*)')
+      .single();
+
+    if (updateError) throw updateError;
+
+    return res.status(201).json({
+      mensaje: 'Operación especial acoplada al pipeline con éxito.',
+      proyecto: proyectoActualizado
+    });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor de OrgaProp corriendo en puerto ${PORT}`);
 });
