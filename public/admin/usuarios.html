@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Usuarios - OrgaProp</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyberDark: '#09090e',
+            cyberCard: '#13131a',
+            cyberBlue: '#00f2fe',
+            cyberPurple: '#9d4edd',
+            cyberPink: '#ff007f'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Estilos Cyberpunk Personalizados -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap');
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #09090e;
+      color: #ffffff;
+      overflow-x: hidden;
+    }
+
+    .font-orbitron {
+      font-family: 'Orbitron', sans-serif;
+    }
+    
+    .font-rajdhani {
+      font-family: 'Rajdhani', sans-serif;
+    }
+
+    /* Cuadrícula de Fondo */
+    .bg-grid {
+      background-image: 
+        linear-gradient(to right, rgba(0, 242, 254, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 242, 254, 0.02) 1px, transparent 1px);
+      background-size: 30px 30px;
+    }
+
+    /* Línea Scanline */
+    .scanline {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: rgba(0, 242, 254, 0.05);
+      z-index: 50;
+      pointer-events: none;
+      animation: scanlineAnim 6s linear infinite;
+    }
+
+    @keyframes scanlineAnim {
+      0% { top: -10px; }
+      100% { top: 100%; }
+    }
+
+    /* Tarjeta Ciberpunk con Corchetes */
+    .cyber-card {
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(19, 19, 26, 0.85);
+      backdrop-filter: blur(8px);
+    }
+
+    .cyber-card::before {
+      content: '';
+      position: absolute;
+      top: -1px;
+      left: -1px;
+      width: 10px;
+      height: 10px;
+      border-top: 2px solid #00f2fe;
+      border-left: 2px solid #00f2fe;
+    }
+
+    .cyber-card::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      right: -1px;
+      width: 10px;
+      height: 10px;
+      border-bottom: 2px solid #9d4edd;
+      border-right: 2px solid #9d4edd;
+    }
+  </style>
+
+  <!-- React y Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- SDK de Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="relative min-h-screen bg-cyberDark">
+
+  <!-- Capas de fondo ambientación -->
+  <div class="absolute inset-0 bg-grid z-0"></div>
+  <div class="scanline"></div>
+
+  <!-- Contenedor Principal SPA -->
+  <div id="root" class="relative z-10 w-full min-h-screen flex flex-col justify-between"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function AdminUsersApp() {
+      const [supabaseClient, setSupabaseClient] = useState(null);
+      const [colaboradores, setColaboradores] = useState([]);
+      const [editUserPassId, setEditUserPassId] = useState(null);
+      const [newPassText, setNewPassText] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      // Autenticación de súper administrador
+      useEffect(() => {
+        async function checkAdminSession() {
+          try {
+            const res = await fetch('/api/config');
+            if (!res.ok) {
+              window.location.href = '../login.html';
+              return;
+            }
+            const config = await res.json();
+            const client = supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+            setSupabaseClient(client);
+
+            const { data: { session } } = await client.auth.getSession();
+            if (!session) {
+              window.location.href = '../login.html';
+              return;
+            }
+
+            const { data: collab } = await client
+              .from('colaboradores')
+              .select('es_admin, activo')
+              .eq('id_colaborador', session.user.id)
+              .single();
+
+            if (!collab || !collab.es_admin || !collab.activo) {
+              alert('ACCESO DENEGADO: Requiere privilegios de Súper Administrador.');
+              window.location.href = '../login.html';
+              return;
+            }
+          } catch (e) {
+            console.error(e);
+            window.location.href = '../login.html';
+          }
+        }
+        checkAdminSession();
+      }, []);
+
+      // Cargar lista de colaboradores
+      useEffect(() => {
+        if (supabaseClient) {
+          fetchColaboradores();
+        }
+      }, [supabaseClient]);
+
+      // Re-inicializar iconos de Lucide
+      useEffect(() => {
+        if (typeof lucide !== 'undefined') {
+          lucide.createIcons();
+        }
+      }, [colaboradores, editUserPassId]);
+
+      const fetchColaboradores = async () => {
+        try {
+          const { data, error } = await supabaseClient
+            .from('colaboradores')
+            .select(`
+              *,
+              planes(nombre, limite_proyectos),
+              rubros(nombre)
+            `)
+            .order('nombre', { ascending: true });
+
+          if (data) setColaboradores(data);
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      // Cambiar estado activo/inactivo (congelar cuenta)
+      const handleToggleStatus = async (collabId, currentStatus) => {
+        try {
+          const res = await fetch(`/api/admin/usuarios/${collabId}/estado`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ activo: !currentStatus })
+          });
+
+          if (res.ok) {
+            fetchColaboradores();
+          } else {
+            const err = await res.json();
+            alert(`Error: ${err.error}`);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      // Guardar cambio de contraseña desde admin
+      const handleSavePassword = async () => {
+        if (newPassText.length < 6 || !editUserPassId) return;
+        setLoading(true);
+
+        try {
+          const res = await fetch(`/api/admin/usuarios/${editUserPassId}/password`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: newPassText })
+          });
+
+          if (res.ok) {
+            setEditUserPassId(null);
+            setNewPassText('');
+            alert('Contraseña modificada con éxito.');
+          } else {
+            const err = await res.json();
+            alert(`Error: ${err.error}`);
+          }
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Cálculo del reloj de vencimiento del plan
+      const getVencimientoText = (collab) => {
+        if (!collab.fecha_vencimiento_plan) {
+          return { text: 'VITALICIO ♾️', isCritical: false };
+        }
+        
+        const end = new Date(collab.fecha_vencimiento_plan);
+        const now = new Date();
+        const diffTime = end - now;
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        if (diffDays < 0) {
+          return { text: `VENCIDO Hace ${Math.abs(diffDays)}d`, isCritical: true };
+        } else if (diffDays <= 5) {
+          return { text: `EXPIRA EN ${diffDays}d ⏳`, isCritical: true };
+        } else {
+          return { text: `VIGENTE (${diffDays} días)`, isCritical: false };
+        }
+      };
+
+      return (
+        <React.Fragment>
+          {/* BARRA DE NAVEGACIÓN */}
+          <nav className="relative z-10 w-full px-6 py-4 flex justify-between items-center border-b border-white/5 bg-cyberCard/90 backdrop-blur-md">
+            <div className="font-orbitron font-bold text-sm tracking-wider flex items-center space-x-2">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyberBlue to-cyberPurple">ORGAPROP</span>
+              <span className="text-white">/</span>
+              <span className="text-cyberBlue text-xs font-black">PANEL CONTROL DIOS</span>
+            </div>
+
+            <div className="flex items-center space-x-6 font-rajdhani text-xs font-bold tracking-widest">
+              <a href="dashboard.html" className="text-gray-400 hover:text-white transition">MÉTRICAS</a>
+              <a href="usuarios.html" className="text-cyberBlue underline">COLABORADORES</a>
+              <a href="proyectos.html" className="text-gray-400 hover:text-white transition">AUDITORÍA</a>
+              <a href="../colaboradores.html" className="text-cyberPurple border border-cyberPurple/20 bg-cyberPurple/5 px-3 py-1.5 hover:bg-cyberPurple hover:text-cyberDark transition">
+                VOLVER AL TALLER
+              </a>
+            </div>
+          </nav>
+
+          {/* CUERPO CENTRAL */}
+          <div className="flex-grow max-w-5xl w-full mx-auto p-6 space-y-6">
+            
+            <div className="flex justify-between items-center pb-2 border-b border-white/5">
+              <h2 className="font-orbitron text-sm tracking-widest font-black text-gray-400">
+                CONTROL DE CUENTAS DE COLABORADORES
+              </h2>
+              <span className="font-rajdhani text-[10px] text-cyberPurple font-bold">BASE DE SOCIOS ACTIVOS</span>
+            </div>
+
+            {/* TABLA CIBERPUNK DE USUARIOS */}
+            <div className="cyber-card overflow-x-auto w-full">
+              <table className="w-full text-left text-xs divide-y divide-white/5 whitespace-nowrap">
+                <thead className="bg-black/40 font-rajdhani text-cyberBlue tracking-widest uppercase font-bold text-[10px]">
+                  <tr>
+                    <th className="px-6 py-4">Firma / Colaborador</th>
+                    <th className="px-6 py-4">Rubro Comercial</th>
+                    <th className="px-6 py-4">Plan</th>
+                    <th className="px-6 py-4">Suscripción Status</th>
+                    <th className="px-6 py-4">Estado Cuenta</th>
+                    <th className="px-6 py-4 text-right">Credenciales / Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5 font-sans">
+                  {colaboradores.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="px-6 py-8 text-center text-gray-600 font-rajdhani text-xs">Cargando base de datos global...</td>
+                    </tr>
+                  ) : (
+                    colaboradores.map((collab) => {
+                      const countdown = getVencimientoText(collab);
+                      return (
+                        <tr key={collab.id_colaborador} className="hover:bg-white/5 transition">
+                          <td className="px-6 py-4 font-semibold text-white uppercase">
+                            <div>
+                              <span>{collab.nombre}</span>
+                              <span className="text-[10px] text-gray-500 font-normal block font-sans lowercase">{collab.correo}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-gray-400 uppercase font-sans text-[11px]">
+                            {collab.rubros?.nombre || 'General'}
+                          </td>
+                          <td className="px-6 py-4 text-gray-400 font-orbitron text-[10px] font-bold">
+                            {collab.planes?.nombre.toUpperCase()}
+                          </td>
+                          <td className={`px-6 py-4 font-orbitron text-[10px] font-black ${countdown.isCritical ? 'text-cyberPink animate-pulse' : 'text-green-400'}`}>
+                            {countdown.text}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`px-2 py-0.5 text-[9px] font-orbitron font-bold ${collab.activo ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-cyberPink/10 text-cyberPink border border-cyberPink/20'}`}>
+                              {collab.activo ? 'ACTIVO' : 'CONGELADO'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right space-x-3">
+                            <button
+                              onClick={() => handleToggleStatus(collab.id_colaborador, collab.activo)}
+                              className={`px-3 py-1 font-rajdhani font-semibold text-[10px] tracking-wider border transition ${collab.activo ? 'border-cyberPink/30 text-cyberPink hover:bg-cyberPink hover:text-white' : 'border-green-500/30 text-green-400 hover:bg-green-500 hover:text-cyberDark'}`}
+                            >
+                              {collab.activo ? 'CONGELAR' : 'DESBLOQUEAR'}
+                            </button>
+                            <button
+                              onClick={() => setEditUserPassId(collab.id_colaborador)}
+                              className="px-3 py-1 font-rajdhani font-semibold text-[10px] tracking-wider border border-cyberBlue/30 text-cyberBlue hover:bg-cyberBlue hover:text-cyberDark transition"
+                            >
+                              LLAVE
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+
+          {/* MODAL: CAMBIO DE CONTRASEÑA */}
+          {editUserPassId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="cyber-card p-6 w-full max-w-sm">
+                <h4 className="font-orbitron text-xs tracking-wider font-bold text-cyberBlue mb-4 font-black">SOBREESCRIBIR CONTRASENA</h4>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">NUEVA CLAVE DE ACCESO</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="MÍNIMO 6 CARACTERES"
+                      value={newPassText}
+                      onChange={(e) => setNewPassText(e.target.value)}
+                      className="w-full bg-cyberDark border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                    />
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button
+                      onClick={handleSavePassword}
+                      disabled={newPassText.length < 6 || loading}
+                      className="flex-grow py-2.5 bg-cyberBlue text-cyberDark font-rajdhani font-bold text-xs tracking-widest hover:shadow-[0_0_10px_rgba(0,242,254,0.3)] transition disabled:opacity-30 disabled:pointer-events-none rounded-none"
+                    >
+                      ACTUALIZAR //
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditUserPassId(null);
+                        setNewPassText('');
+                      }}
+                      className="px-4 py-2.5 border border-white/10 hover:bg-white/5 text-gray-400 font-rajdhani text-xs tracking-widest rounded-none"
+                    >
+                      CANCELAR
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </React.Fragment>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<AdminUsersApp />);
+  </script>
+</body>
+</html>

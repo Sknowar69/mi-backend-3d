@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel Operativo - OrgaProp</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyberDark: '#09090e',
+            cyberCard: '#13131a',
+            cyberBlue: '#00f2fe',
+            cyberPurple: '#9d4edd',
+            cyberPink: '#ff007f'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Estilos Cyberpunk Personalizados -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap');
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #09090e;
+      color: #ffffff;
+      overflow: hidden; /* Evita scroll global, el scroll es interno */
+    }
+
+    .font-orbitron {
+      font-family: 'Orbitron', sans-serif;
+    }
+    
+    .font-rajdhani {
+      font-family: 'Rajdhani', sans-serif;
+    }
+
+    /* Cuadrícula de Fondo */
+    .bg-grid {
+      background-image: 
+        linear-gradient(to right, rgba(0, 242, 254, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 242, 254, 0.02) 1px, transparent 1px);
+      background-size: 30px 30px;
+    }
+
+    /* Línea Scanline */
+    .scanline {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: rgba(0, 242, 254, 0.05);
+      z-index: 50;
+      pointer-events: none;
+      animation: scanlineAnim 6s linear infinite;
+    }
+
+    @keyframes scanlineAnim {
+      0% { top: -10px; }
+      100% { top: 100%; }
+    }
+
+    .terminal-blink {
+      animation: blink 1.5s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Tarjeta Ciberpunk con Corchetes */
+    .cyber-card {
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(19, 19, 26, 0.85);
+      backdrop-filter: blur(8px);
+    }
+
+    .cyber-card::before {
+      content: '';
+      position: absolute;
+      top: -1px;
+      left: -1px;
+      width: 10px;
+      height: 10px;
+      border-top: 2px solid #00f2fe;
+      border-left: 2px solid #00f2fe;
+    }
+
+    .cyber-card::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      right: -1px;
+      width: 10px;
+      height: 10px;
+      border-bottom: 2px solid #9d4edd;
+      border-right: 2px solid #9d4edd;
+    }
+
+    .neon-border-blue:focus {
+      border-color: #00f2fe;
+      box-shadow: 0 0 10px rgba(0, 242, 254, 0.3);
+    }
+
+    /* Custom scrollbars */
+    ::-webkit-scrollbar {
+      width: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.3);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(157, 78, 237, 0.3);
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(0, 242, 254, 0.5);
+    }
+  </style>
+
+  <!-- React y Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- SDK de Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="relative min-h-screen bg-cyberDark flex flex-col justify-between">
+
+  <!-- Capas de fondo ambientación -->
+  <div class="absolute inset-0 bg-grid z-0"></div>
+  <div class="scanline"></div>
+
+  <!-- Destellos de luz radiales -->
+  <div class="absolute top-0 left-0 w-96 h-96 bg-[radial-gradient(circle,_rgba(0,242,254,0.04)_0%,_transparent_70%)] pointer-events-none"></div>
+  <div class="absolute bottom-0 right-0 w-96 h-96 bg-[radial-gradient(circle,_rgba(157,78,237,0.04)_0%,_transparent_70%)] pointer-events-none"></div>
+
+  <div id="root" class="relative z-10 w-full h-screen flex flex-col"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function ColaboradorApp() {
+      const [supabaseClient, setSupabaseClient] = useState(null);
+      const [session, setSession] = useState(null);
+      const [colaborador, setColaborador] = useState(null);
+
+      // Data states
+      const [activeProjects, setActiveProjects] = useState([]);
+      const [completedProjects, setCompletedProjects] = useState([]);
+      const [categories, setCategories] = useState([]);
+      const [templates, setTemplates] = useState([]);
+
+      // Filters
+      const [searchQuery, setSearchQuery] = useState('');
+      const [historySearchQuery, setHistorySearchQuery] = useState('');
+
+      // Accordion toggles (project details)
+      const [expandedProjectId, setExpandedProjectId] = useState(null);
+
+      // Panel B / Generar Orden state
+      const [newOrderClient, setNewOrderClient] = useState('');
+      const [newOrderTemplateId, setNewOrderTemplateId] = useState('');
+      const [newOrderCategoryId, setNewOrderCategoryId] = useState('');
+      const [newOrderForcedPos, setNewOrderForcedPos] = useState('');
+      const [newOrderStartDate, setNewOrderStartDate] = useState(new Date().toISOString().split('T')[0]);
+      const [newOrderManualDelivery, setNewOrderManualDelivery] = useState('');
+      const [newOrderCalculatedDelivery, setNewOrderCalculatedDelivery] = useState('');
+      const [newOrderNotes, setNewOrderNotes] = useState('');
+
+      // Panel A / Crear Producto Maestro state
+      const [templateName, setTemplateName] = useState('');
+      const [templateSteps, setTemplateSteps] = useState([{ numero_paso: 1, descripcion: '', tiempo_estimado_horas: 1 }]);
+
+      // Modals and contextual popups
+      const [rescheduleProjectId, setRescheduleProjectId] = useState(null);
+      const [newDeliveryDate, setNewDeliveryDate] = useState('');
+      const [rescheduleReason, setRescheduleReason] = useState('');
+
+      const [confirmStepData, setConfirmStepData] = useState(null); // { stepId, name, completado }
+      const [extraStepProjectId, setExtraStepProjectId] = useState(null);
+      const [extraStepName, setExtraStepName] = useState('');
+      const [extraStepHours, setExtraStepHours] = useState('');
+
+      const [showNewCategoryModal, setShowNewCategoryModal] = useState(false);
+      const [newCategoryName, setNewCategoryName] = useState('');
+
+      const [showCompletedHistory, setShowCompletedHistory] = useState(false);
+      const [selectedGalleryProjId, setSelectedGalleryProjId] = useState(null);
+      const [galleryPhotos, setGalleryPhotos] = useState([]);
+
+      const [loading, setLoading] = useState(false);
+      const [errorMsg, setErrorMsg] = useState('');
+      const [successMsg, setSuccessMsg] = useState('');
+
+      // Cargar configuraciones del backend e inicializar Supabase
+      useEffect(() => {
+        async function fetchConfig() {
+          try {
+            const res = await fetch('/api/config');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.supabaseUrl && data.supabaseAnonKey) {
+                const client = supabase.createClient(data.supabaseUrl, data.supabaseAnonKey);
+                setSupabaseClient(client);
+
+                // Obtener sesión activa
+                const { data: { session: activeSession } } = await client.auth.getSession();
+                if (!activeSession) {
+                  window.location.href = 'login.html';
+                  return;
+                }
+                setSession(activeSession);
+
+                // Fetch colaborador details
+                const { data: collab } = await client
+                  .from('colaboradores')
+                  .select('*')
+                  .eq('id_colaborador', activeSession.user.id)
+                  .single();
+                
+                setColaborador(collab);
+              }
+            }
+          } catch (e) {
+            console.error('Error cargando la configuración:', e);
+          }
+        }
+        fetchConfig();
+      }, []);
+
+      // Cargar datos cuando tengamos cliente de Supabase y sesión
+      useEffect(() => {
+        if (supabaseClient && session) {
+          fetchData();
+        }
+      }, [supabaseClient, session]);
+
+      // Efecto secundario para recalcular automáticamente la entrega sugerida en Panel B
+      useEffect(() => {
+        if (!newOrderTemplateId) {
+          setNewOrderCalculatedDelivery('');
+          return;
+        }
+        
+        // Sumar horas de la plantilla
+        const selectedTemplate = templates.find(t => t.id_producto_base === newOrderTemplateId);
+        if (!selectedTemplate) return;
+
+        // Intentar obtener las horas del backend o sumando pasos si están cargados
+        async function fetchTemplateStepsAndCalc() {
+          const { data: steps } = await supabaseClient
+            .from('pasos_producto_base')
+            .select('tiempo_estimado_horas')
+            .eq('id_producto_base', newOrderTemplateId);
+
+          const totalHoras = steps ? steps.reduce((acc, s) => acc + (s.tiempo_estimado_horas || 0), 0) : 0;
+          const templateDays = totalHoras / 24;
+
+          // Obtener posición estimada (final de la cola activa)
+          const position = newOrderForcedPos ? parseInt(newOrderForcedPos) : (activeProjects.length + 1);
+          const waitDays = (position * templateDays) + 2;
+
+          const start = new Date(newOrderStartDate);
+          start.setDate(start.getDate() + Math.ceil(waitDays));
+          setNewOrderCalculatedDelivery(start.toISOString().split('T')[0]);
+        }
+
+        fetchTemplateStepsAndCalc();
+      }, [newOrderTemplateId, newOrderStartDate, newOrderForcedPos, templates, activeProjects]);
+
+      // Re-inicializar iconos de Lucide
+      useEffect(() => {
+        if (typeof lucide !== 'undefined') {
+          lucide.createIcons();
+        }
+      }, [activeProjects, completedProjects, expandedProjectId, rescheduleProjectId, confirmStepData, extraStepProjectId, showNewCategoryModal, showCompletedHistory, selectedGalleryProjId, galleryPhotos]);
+
+      const fetchData = async () => {
+        if (!supabaseClient || !session) return;
+        try {
+          // 1. Proyectos activos (En cola, En proceso)
+          const { data: actProjs } = await supabaseClient
+            .from('proyectos')
+            .select(`
+              *,
+              clientes(nombre),
+              categorias_proyecto(nombre)
+            `)
+            .eq('id_colaborador', session.user.id)
+            .neq('estado', 'Completado')
+            .order('orden_lista', { ascending: true });
+
+          // 2. Proyectos completados
+          const { data: compProjs } = await supabaseClient
+            .from('proyectos')
+            .select(`
+              *,
+              clientes(nombre),
+              categorias_proyecto(nombre)
+            `)
+            .eq('id_colaborador', session.user.id)
+            .eq('estado', 'Completado')
+            .order('fecha_completado_real', { ascending: false });
+
+          // 3. Categorías creadas
+          const { data: cats } = await supabaseClient
+            .from('categorias_proyecto')
+            .select('*')
+            .eq('id_colaborador', session.user.id)
+            .order('nombre', { ascending: true });
+
+          // 4. Plantillas Maestras
+          const { data: temps } = await supabaseClient
+            .from('productos_base')
+            .select('*')
+            .eq('id_colaborador', session.user.id)
+            .order('nombre', { ascending: true });
+
+          if (actProjs) setActiveProjects(actProjs);
+          if (compProjs) setCompletedProjects(compProjs);
+          if (cats) setCategories(cats);
+          if (temps) setTemplates(temps);
+
+        } catch (e) {
+          console.error('Error cargando colecciones:', e);
+        }
+      };
+
+      // Cierre de Sesión
+      const handleLogout = async () => {
+        if (supabaseClient) {
+          await supabaseClient.auth.signOut();
+          window.location.href = 'login.html';
+        }
+      };
+
+      // Toggles de acordeón de pasos
+      const toggleProjectSteps = async (projId) => {
+        if (expandedProjectId === projId) {
+          setExpandedProjectId(null);
+          return;
+        }
+        
+        // Cargar los pasos operativos de ese proyecto
+        const { data: steps } = await supabaseClient
+          .from('pasos_proyecto')
+          .select('*')
+          .eq('id_proyecto', projId)
+          .order('numero_paso', { ascending: true });
+
+        // Asociamos temporalmente los pasos al proyecto correspondiente
+        setActiveProjects(prev => prev.map(p => {
+          if (p.id_proyecto === projId) {
+            return { ...p, pasos: steps || [] };
+          }
+          return p;
+        }));
+
+        setExpandedProjectId(projId);
+      };
+
+      // Manejar cambios del checkbox del checklist en el frontend
+      const handleCheckboxClick = (stepId, stepName, isCompletado) => {
+        setConfirmStepData({ stepId, name: stepName, completado: !isCompletado });
+      };
+
+      // Confirmación de marcación del paso
+      const confirmStepChange = async () => {
+        if (!confirmStepData) return;
+        const { stepId, completado } = confirmStepData;
+        setConfirmStepData(null);
+
+        try {
+          const res = await fetch(`/api/admin/checklist/${stepId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ completado })
+          });
+
+          if (res.ok) {
+            // Recargar datos operativos
+            fetchData();
+            
+            // Si el proyecto que se expandía se completó, colapsarlo
+            const updated = await res.json();
+            if (updated.proyecto && updated.proyecto.estado === 'Completado') {
+              setExpandedProjectId(null);
+            } else if (expandedProjectId) {
+              // Refrescar checklist del proyecto actual
+              const { data: steps } = await supabaseClient
+                .from('pasos_proyecto')
+                .select('*')
+                .eq('id_proyecto', expandedProjectId)
+                .order('numero_paso', { ascending: true });
+
+              setActiveProjects(prev => prev.map(p => {
+                if (p.id_proyecto === expandedProjectId) {
+                  return { ...p, pasos: steps || [] };
+                }
+                return p;
+              }));
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      // Reajuste de Fecha (icono lapicito)
+      const submitReschedule = async () => {
+        if (!newDeliveryDate || !rescheduleReason || !rescheduleProjectId) return;
+        
+        try {
+          // 1. Registrar bitácora
+          await supabaseClient.from('historial_notas').insert({
+            id_proyecto: rescheduleProjectId,
+            nota: `Fecha modificada a ${formatFechaSimple(newDeliveryDate)}. Justificación: ${rescheduleReason}`,
+            tipo_nota: 'Cambio de fecha'
+          });
+
+          // 2. Modificar proyecto
+          const { error } = await supabaseClient
+            .from('proyectos')
+            .update({ fecha_entrega_manual: newDeliveryDate })
+            .eq('id_proyecto', rescheduleProjectId);
+
+          if (!error) {
+            setRescheduleProjectId(null);
+            setNewDeliveryDate('');
+            setRescheduleReason('');
+            fetchData();
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      // Inyección de paso especial en pipeline vivo
+      const submitExtraStep = async () => {
+        if (!extraStepName || !extraStepHours || !extraStepProjectId) return;
+
+        try {
+          // 1. Buscar último número de paso
+          const { data: steps } = await supabaseClient
+            .from('pasos_proyecto')
+            .select('numero_paso')
+            .eq('id_proyecto', extraStepProjectId)
+            .order('numero_paso', { ascending: false })
+            .limit(1);
+
+          const nextNum = (steps && steps.length > 0) ? steps[0].numero_paso + 1 : 1;
+
+          // 2. Insertar paso extra
+          const { data: newStep, error } = await supabaseClient
+            .from('pasos_proyecto')
+            .insert({
+              id_proyecto: extraStepProjectId,
+              numero_paso: nextNum,
+              descripcion: extraStepName,
+              tiempo_estimado_horas: parseInt(extraStepHours),
+              completado: false
+            })
+            .select()
+            .single();
+
+          if (!error && newStep) {
+            // Disparar recálculo de avance
+            const updateRes = await fetch(`/api/admin/checklist/${newStep.id_paso}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ completado: false }) // Esto recalcula el total de la barra sumando la nueva tarea
+            });
+
+            if (updateRes.ok) {
+              setExtraStepProjectId(null);
+              setExtraStepName('');
+              setExtraStepHours('');
+              fetchData();
+              
+              // Refrescar listado desplegado
+              const { data: updatedSteps } = await supabaseClient
+                .from('pasos_proyecto')
+                .select('*')
+                .eq('id_proyecto', extraStepProjectId)
+                .order('numero_paso', { ascending: true });
+
+              setActiveProjects(prev => prev.map(p => {
+                if (p.id_proyecto === extraStepProjectId) {
+                  return { ...p, pasos: updatedSteps || [] };
+                }
+                return p;
+              }));
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      // Registrar nueva categoría al vuelo
+      const submitNewCategory = async () => {
+        if (!newCategoryName || !supabaseClient) return;
+
+        try {
+          const { data, error } = await supabaseClient
+            .from('categorias_proyecto')
+            .insert({
+              id_colaborador: session.user.id,
+              nombre: newCategoryName
+            })
+            .select()
+            .single();
+
+          if (!error && data) {
+            setCategories(prev => [...prev, data]);
+            setNewOrderCategoryId(data.id_categoria);
+            setShowNewCategoryModal(false);
+            setNewCategoryName('');
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      // Guardar Fórmula (Producto Maestro) en la Nube
+      const handleSaveTemplate = async (e) => {
+        e.preventDefault();
+        if (!templateName || templateSteps.some(s => !s.descripcion)) return;
+
+        setLoading(true);
+
+        try {
+          const res = await fetch('/api/admin/productos-base', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id_colaborador: session.user.id,
+              nombre: templateName,
+              pasos: templateSteps
+            })
+          });
+
+          if (res.ok) {
+            setTemplateName('');
+            setTemplateSteps([{ numero_paso: 1, descripcion: '', tiempo_estimado_horas: 1 }]);
+            fetchData();
+            alert('Fórmula base guardada con éxito.');
+          }
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Inserción de Filas del configurador de fórmulas
+      const addTemplateStepRow = () => {
+        if (templateSteps.length >= 25) return;
+        setTemplateSteps(prev => [...prev, {
+          numero_paso: prev.length + 1,
+          descripcion: '',
+          tiempo_estimado_horas: 1
+        }]);
+      };
+
+      const removeTemplateStepRow = (index) => {
+        setTemplateSteps(prev => prev.filter((_, i) => i !== index).map((s, idx) => ({
+          ...s,
+          numero_paso: idx + 1
+        })));
+      };
+
+      // Generar Nueva Orden
+      const handleGenerateOrder = async (e) => {
+        e.preventDefault();
+        if (!newOrderClient || !newOrderCategoryId) return;
+
+        setLoading(true);
+
+        try {
+          // 1. Obtener o crear el cliente en la base
+          let clienteId = '';
+          const { data: existingClient } = await supabaseClient
+            .from('clientes')
+            .select('id_cliente')
+            .eq('id_colaborador', session.user.id)
+            .eq('nombre', newOrderClient.trim())
+            .maybeSingle();
+
+          if (existingClient) {
+            clienteId = existingClient.id_cliente;
+          } else {
+            const { data: newClient, error: cErr } = await supabaseClient
+              .from('clientes')
+              .insert({
+                id_colaborador: session.user.id,
+                nombre: newOrderClient.trim()
+              })
+              .select()
+              .single();
+
+            if (cErr) throw cErr;
+            clienteId = newClient.id_cliente;
+          }
+
+          // 2. Enviar los datos del proyecto al backend
+          const res = await fetch('/api/admin/proyectos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id_colaborador: session.user.id,
+              id_cliente: clienteId,
+              id_categoria: newOrderCategoryId,
+              nombre: newOrderTemplateId ? templates.find(t => t.id_producto_base === newOrderTemplateId).nombre : 'Pieza Personalizada',
+              fecha_inicio: newOrderStartDate,
+              fecha_entrega_manual: newOrderManualDelivery || null,
+              id_producto_base: newOrderTemplateId || null,
+              orden_lista: newOrderForcedPos ? parseInt(newOrderForcedPos) : null,
+              nota_interna: newOrderNotes
+            })
+          });
+
+          if (res.ok) {
+            setNewOrderClient('');
+            setNewOrderTemplateId('');
+            setNewOrderCategoryId('');
+            setNewOrderForcedPos('');
+            setNewOrderManualDelivery('');
+            setNewOrderNotes('');
+            fetchData();
+          }
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Gestionar Galería de fotos para completados
+      const viewGallery = async (projId) => {
+        setSelectedGalleryProjId(projId);
+        const { data: photos } = await supabaseClient
+          .from('fotos_completado')
+          .select('*')
+          .eq('id_proyecto', projId);
+        setGalleryPhotos(photos || []);
+      };
+
+      const handlePhotoUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file || !selectedGalleryProjId) return;
+
+        if (galleryPhotos.length >= 5) {
+          alert('Límite de imágenes alcanzado (Máx: 5).');
+          return;
+        }
+
+        try {
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${selectedGalleryProjId}_${Date.now()}.${fileExt}`;
+          const filePath = `fotos/${fileName}`;
+
+          // Subir al Bucket de Supabase
+          const { error: uploadErr } = await supabaseClient.storage
+            .from('fotos_proyectos')
+            .upload(filePath, file);
+
+          if (uploadErr) throw uploadErr;
+
+          // Obtener url pública
+          const { data: { publicUrl } } = supabaseClient.storage
+            .from('fotos_proyectos')
+            .getPublicUrl(filePath);
+
+          // Insertar en la tabla fotos_completado
+          await supabaseClient.from('fotos_completado').insert({
+            id_proyecto: selectedGalleryProjId,
+            url_imagen: publicUrl
+          });
+
+          viewGallery(selectedGalleryProjId);
+        } catch (err) {
+          console.error('Error al subir imagen:', err);
+        }
+      };
+
+      const deletePhoto = async (photoId, photoUrl) => {
+        try {
+          // Extraer nombre del storage
+          const pathParts = photoUrl.split('/');
+          const fileName = pathParts[pathParts.length - 1];
+          
+          await supabaseClient.storage
+            .from('fotos_proyectos')
+            .remove([`fotos/${fileName}`]);
+
+          await supabaseClient
+            .from('fotos_completado')
+            .delete()
+            .eq('id_foto', photoId);
+
+          viewGallery(selectedGalleryProjId);
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      // Helpers de fechas
+      const formatFechaSimple = (fechaStr) => {
+        if (!fechaStr) return 'No definida';
+        const date = new Date(fechaStr + 'T00:00:00');
+        return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      };
+
+      // Filtros reactivos
+      const filteredActiveProjects = activeProjects.filter(p => {
+        const clientName = p.clientes?.nombre || '';
+        const categoryName = p.categorias_proyecto?.nombre || '';
+        const search = searchQuery.toLowerCase();
+        return p.nombre.toLowerCase().includes(search) ||
+               clientName.toLowerCase().includes(search) ||
+               categoryName.toLowerCase().includes(search) ||
+               p.codigo_seguimiento.toLowerCase().includes(search);
+      });
+
+      const filteredCompletedProjects = completedProjects.filter(p => {
+        const clientName = p.clientes?.nombre || '';
+        const search = historySearchQuery.toLowerCase();
+        return p.nombre.toLowerCase().includes(search) || clientName.toLowerCase().includes(search);
+      });
+
+      return (
+        <div className="flex flex-col h-screen overflow-hidden">
+          
+          {/* BARRA DE NAVEGACIÓN */}
+          <nav className="relative z-10 w-full px-6 py-4 flex justify-between items-center border-b border-white/5 bg-cyberCard/90 backdrop-blur-md flex-shrink-0">
+            <div className="font-orbitron font-bold text-sm tracking-wider flex items-center space-x-1">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyberBlue to-white">ORGAPROP</span>
+              <span className="text-white">/</span>
+              <span className="text-white text-xs">{colaborador ? colaborador.nombre.toUpperCase() : 'CARGANDO...'}</span>
+            </div>
+
+            <div className="flex items-center space-x-4">
+              {colaborador && colaborador.es_admin && (
+                <a
+                  href="admin/dashboard.html"
+                  className="font-rajdhani text-xs tracking-wider text-cyberBlue border border-cyberBlue/20 bg-cyberBlue/5 px-3 py-1.5 hover:bg-cyberBlue hover:text-cyberDark transition duration-300 font-semibold"
+                >
+                  [ MODO ADMINISTRADOR ]
+                </a>
+              )}
+              <button
+                onClick={handleLogout}
+                className="font-rajdhani text-xs tracking-widest text-cyberPink hover:underline flex items-center space-x-1"
+              >
+                <i data-lucide="log-out" className="w-3.5 h-3.5"></i>
+                <span>DESCONECTAR</span>
+              </button>
+            </div>
+          </nav>
+
+          {/* CUERPO ASIMÉTRICO */}
+          <div className="flex-grow flex flex-col md:flex-row overflow-hidden relative z-10">
+            
+            {/* COLUMNA IZQUIERDA (60%): COLA ACTIVA DE MANUFACTURA */}
+            <div className="w-full md:w-3/5 p-6 flex flex-col overflow-hidden border-r border-white/5">
+              
+              {/* Buscador superior */}
+              <div className="mb-4">
+                <input
+                  type="text"
+                  placeholder="FILTRAR COLA POR CLIENTE, CÓDIGO O PROYECTO..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-3 text-xs text-white focus:outline-none focus:border-cyberBlue focus:shadow-[0_0_10px_rgba(0,242,254,0.2)] font-sans transition duration-300 placeholder:text-gray-600"
+                />
+              </div>
+
+              {/* Título e indicador de volumen */}
+              <div className="flex justify-between items-center mb-4 flex-shrink-0">
+                <h2 className="font-orbitron text-xs tracking-widest font-black text-gray-400">
+                  COLA ACTIVA DE MANUFACTURA ({filteredActiveProjects.length})
+                </h2>
+                <span className="font-rajdhani text-[10px] text-cyberPurple font-semibold">TALLER OPERANDO EN VIVO</span>
+              </div>
+
+              {/* CONTENEDOR CON SCROLL INDEPENDIENTE */}
+              <div className="flex-grow overflow-y-auto space-y-4 pr-2">
+                {filteredActiveProjects.length === 0 ? (
+                  <div className="text-center py-20 border border-dashed border-white/5">
+                    <span className="font-rajdhani text-xs text-gray-600 block">No hay proyectos activos en cola de producción.</span>
+                  </div>
+                ) : (
+                  filteredActiveProjects.map((proj) => {
+                    const isExpanded = expandedProjectId === proj.id_proyecto;
+                    return (
+                      <div key={proj.id_proyecto} className="cyber-card p-5 space-y-4 shadow-md">
+                        
+                        {/* Fila principal de datos */}
+                        <div className="flex justify-between items-start gap-4">
+                          <div className="flex items-center space-x-4">
+                            {/* Número de Fila */}
+                            <span className="w-8 h-8 rounded-none border border-cyberPurple/20 bg-cyberPurple/10 flex items-center justify-center font-orbitron text-sm text-cyberPurple font-black">
+                              {proj.orden_lista}
+                            </span>
+                            
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-sans text-sm font-semibold text-white truncate max-w-[150px] uppercase">
+                                  {proj.clientes?.nombre}
+                                </span>
+                                <span className="text-gray-600">/</span>
+                                <span className="font-rajdhani text-[10px] bg-cyberCard px-2 py-0.5 border border-white/5 text-gray-400 font-semibold uppercase">
+                                  {proj.categorias_proyecto?.nombre || 'General'}
+                                </span>
+                              </div>
+                              <h3 className="font-orbitron text-xs font-bold text-gray-400 mt-1 uppercase truncate max-w-[200px]">
+                                {proj.nombre}
+                              </h3>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-4">
+                            {/* Entrega con lapicito */}
+                            <div className="text-right">
+                              <span className="font-rajdhani text-[9px] text-gray-500 block">ENTREGA</span>
+                              <div className="flex items-center space-x-1.5 mt-0.5">
+                                <span className="font-sans text-xs text-white">
+                                  {formatFechaSimple(proj.fecha_entrega_manual || proj.fecha_entrega_calculada)}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    setRescheduleProjectId(proj.id_proyecto);
+                                    setNewDeliveryDate(proj.fecha_entrega_manual || proj.fecha_entrega_calculada || '');
+                                  }}
+                                  className="text-gray-500 hover:text-cyberBlue transition"
+                                >
+                                  <i data-lucide="edit-3" className="w-3.5 h-3.5"></i>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Tracking Code */}
+                            <div className="text-right">
+                              <span className="font-rajdhani text-[9px] text-gray-500 block">TRACKING</span>
+                              <div className="flex items-center space-x-1 mt-0.5">
+                                <span className="font-orbitron text-xs text-cyberBlue font-black">{proj.codigo_seguimiento}</span>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(proj.codigo_seguimiento);
+                                    alert('Código copiado al portapapeles.');
+                                  }}
+                                  className="text-gray-500 hover:text-cyberBlue transition"
+                                >
+                                  <i data-lucide="copy" className="w-3 h-3"></i>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Barra de Progreso e indicador numérico */}
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex-grow bg-black/60 h-2 border border-white/5 overflow-hidden relative">
+                            <div
+                              className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-cyberBlue to-cyberPurple transition-all duration-300"
+                              style={{ width: `${proj.porcentaje_avance}%` }}
+                            ></div>
+                          </div>
+                          
+                          <div className="flex items-center space-x-3">
+                            <span className="font-orbitron text-[11px] font-black text-cyberBlue">
+                              {proj.porcentaje_avance}%
+                            </span>
+                            <button
+                              onClick={() => toggleProjectSteps(proj.id_proyecto)}
+                              className="text-gray-400 hover:text-white transition"
+                            >
+                              <i data-lucide={isExpanded ? "chevron-up" : "chevron-down"} className="w-4 h-4"></i>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* ACORDEÓN CHECKLIST DESPLEGABLE */}
+                        {isExpanded && proj.pasos && (
+                          <div className="pt-3 border-t border-white/5 space-y-3">
+                            <div className="flex justify-between items-center">
+                              <span className="font-rajdhani text-[10px] text-gray-400 font-bold tracking-widest uppercase">CHECKLIST DEL PROYECTO</span>
+                              <button
+                                onClick={() => setExtraStepProjectId(proj.id_proyecto)}
+                                className="font-rajdhani text-[10px] text-cyberBlue hover:underline font-semibold"
+                              >
+                                + AÑADIR OPERACIÓN ESPECIAL
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                              {proj.pasos.map((paso) => (
+                                <div key={paso.id_paso} className="flex items-center justify-between p-2 border border-white/5 bg-black/20">
+                                  <label className="flex items-center space-x-2.5 cursor-pointer select-none truncate">
+                                    <input
+                                      type="checkbox"
+                                      checked={paso.completado}
+                                      onChange={() => handleCheckboxClick(paso.id_paso, paso.descripcion, paso.completado)}
+                                      className="w-3.5 h-3.5 border border-white/20 bg-cyberDark rounded-none focus:outline-none accent-cyberBlue"
+                                    />
+                                    <span className={`text-xs truncate ${paso.completado ? 'text-gray-400 font-semibold line-through' : 'text-white'}`}>
+                                      {paso.numero_paso}. {paso.descripcion}
+                                    </span>
+                                  </label>
+                                  <span className="font-rajdhani text-[10px] text-gray-500">{paso.tiempo_estimado_horas}h</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* COLUMNA DERECHA (40%): CREADORES, FORMULARIOS E HISTORIAL */}
+            <div className="w-full md:w-2/5 p-6 flex flex-col overflow-y-auto space-y-6">
+              
+              {/* PANEL B: OPERACIONES DE FILA (GENERAR NUEVA ORDEN) */}
+              <div className="cyber-card p-5">
+                <h3 className="font-orbitron text-xs tracking-widest font-black text-cyberBlue mb-4 uppercase">
+                  GENERAR NUEVA ORDEN //
+                </h3>
+                
+                <form onSubmit={handleGenerateOrder} className="space-y-4">
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">CLIENTE</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="EJ: ABRAHAM"
+                      value={newOrderClient}
+                      onChange={(e) => setNewOrderClient(e.target.value)}
+                      className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">PLANTILLA BASE</label>
+                      <select
+                        value={newOrderTemplateId}
+                        onChange={(e) => setNewOrderTemplateId(e.target.value)}
+                        className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                      >
+                        <option value="">-- PERSONALIZADA --</option>
+                        {templates.map(t => (
+                          <option key={t.id_producto_base} value={t.id_producto_base}>{t.nombre.toUpperCase()}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block font-rajdhani text-[10px] font-semibold text-gray-400">CATEGORÍA</label>
+                        <button
+                          type="button"
+                          onClick={() => setShowNewCategoryModal(true)}
+                          className="font-rajdhani text-[10px] text-cyberPurple hover:text-cyberBlue font-bold"
+                        >
+                          + CREAR
+                        </button>
+                      </div>
+                      <select
+                        required
+                        value={newOrderCategoryId}
+                        onChange={(e) => setNewOrderCategoryId(e.target.value)}
+                        className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                      >
+                        <option value="" disabled>-- SELECCIONA --</option>
+                        {categories.map(c => (
+                          <option key={c.id_categoria} value={c.id_categoria}>{c.nombre.toUpperCase()}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">POSICIÓN EN COLA</label>
+                      <input
+                        type="number"
+                        placeholder="AL FINAL"
+                        value={newOrderForcedPos}
+                        onChange={(e) => setNewOrderForcedPos(e.target.value)}
+                        className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">FECHA INICIO</label>
+                      <input
+                        type="date"
+                        required
+                        value={newOrderStartDate}
+                        onChange={(e) => setNewOrderStartDate(e.target.value)}
+                        className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">FECHA COMPROMISO</label>
+                      <input
+                        type="date"
+                        value={newOrderManualDelivery}
+                        onChange={(e) => setNewOrderManualDelivery(e.target.value)}
+                        className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                      />
+                    </div>
+                  </div>
+
+                  {newOrderCalculatedDelivery && (
+                    <div className="text-[10px] font-orbitron text-cyberBlue">
+                      SUGERIDO POR PLAN DE COLA: {formatFechaSimple(newOrderCalculatedDelivery)} (+2 DÍAS SEGURIDAD INCLUIDOS)
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">NOTAS INTERNAS DE PRODUCCIÓN</label>
+                    <textarea
+                      placeholder="APUNTES OPERATIVOS (EJ: USAR FILAMENTO PETG AZUL)..."
+                      value={newOrderNotes}
+                      onChange={(e) => setNewOrderNotes(e.target.value)}
+                      className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans h-16 resize-none"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 bg-gradient-to-r from-cyberBlue to-cyberPurple text-cyberDark font-rajdhani font-bold tracking-widest text-xs hover:-translate-y-0.5 hover:shadow-[0_0_10px_rgba(0,242,254,0.3)] transition duration-300 rounded-none"
+                  >
+                    GENERAR ORDEN DE PRODUCCIÓN //
+                  </button>
+                </form>
+              </div>
+
+              {/* PANEL A: CONFIGURADOR DE PIPELINE (CREAR PRODUCTO MAESTRO) */}
+              <div className="cyber-card p-5">
+                <h3 className="font-orbitron text-xs tracking-widest font-black text-cyberPurple mb-4 uppercase">
+                  MOLDE MAESTRO DE PIPELINE //
+                </h3>
+
+                <form onSubmit={handleSaveTemplate} className="space-y-4">
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">NOMBRE DE LA PLANTILLA</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="EJ: MÁSCARA DE SPIDER-MAN"
+                      value={templateName}
+                      onChange={(e) => setTemplateName(e.target.value)}
+                      className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="font-rajdhani text-[10px] text-gray-400 font-bold tracking-widest">PASOS OPERATIVOS ({templateSteps.length}/25)</span>
+                      <button
+                        type="button"
+                        onClick={addTemplateStepRow}
+                        className="font-rajdhani text-[10px] text-cyberBlue font-semibold"
+                      >
+                        + AÑADIR FILA
+                      </button>
+                    </div>
+
+                    <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
+                      {templateSteps.map((step, index) => (
+                        <div key={index} className="flex gap-2 items-center">
+                          <span className="font-orbitron text-[10px] text-cyberPurple font-black w-4">{step.numero_paso}</span>
+                          <input
+                            type="text"
+                            required
+                            placeholder="DESCRIPCIÓN DE LA TAREA"
+                            value={step.descripcion}
+                            onChange={(e) => {
+                              const copy = [...templateSteps];
+                              copy[index].descripcion = e.target.value;
+                              setTemplateSteps(copy);
+                            }}
+                            className="flex-grow bg-cyberDark/80 border border-white/10 rounded-none px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                          />
+                          <input
+                            type="number"
+                            required
+                            min="1"
+                            value={step.tiempo_estimado_horas}
+                            onChange={(e) => {
+                              const copy = [...templateSteps];
+                              copy[index].tiempo_estimado_horas = parseInt(e.target.value) || 1;
+                              setTemplateSteps(copy);
+                            }}
+                            className="w-14 bg-cyberDark/80 border border-white/10 rounded-none px-2 py-1.5 text-xs text-white text-center focus:outline-none focus:border-cyberBlue font-sans"
+                          />
+                          <span className="font-rajdhani text-[9px] text-gray-600">Hrs</span>
+                          
+                          {templateSteps.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeTemplateStepRow(index)}
+                              className="text-gray-500 hover:text-cyberPink transition p-1"
+                            >
+                              <i data-lucide="trash-2" className="w-3.5 h-3.5"></i>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 border border-cyberPurple text-cyberPurple bg-cyberPurple/5 font-rajdhani font-bold tracking-widest text-xs hover:bg-cyberPurple hover:text-cyberDark hover:shadow-[0_0_10px_rgba(157,78,237,0.3)] transition duration-300 rounded-none"
+                  >
+                    GUARDAR FÓRMULA EN LA NUBE //
+                  </button>
+                </form>
+              </div>
+
+              {/* PANEL C: HISTORIAL DE PEDIDOS COMPLETADOS (COLAPSABLE) */}
+              <div className="cyber-card p-5">
+                <div className="flex justify-between items-center cursor-pointer" onClick={() => setShowCompletedHistory(!showCompletedHistory)}>
+                  <h3 className="font-orbitron text-xs tracking-widest font-black text-gray-400 uppercase">
+                    HISTORIAL DE PEDIDOS ENTREGADOS ({completedProjects.length})
+                  </h3>
+                  <i data-lucide={showCompletedHistory ? "minus" : "plus"} className="w-4 h-4 text-gray-500"></i>
+                </div>
+
+                {showCompletedHistory && (
+                  <div className="mt-4 space-y-4 pt-4 border-t border-white/5 animate-fade-in">
+                    <input
+                      type="text"
+                      placeholder="BUSCAR EN EL ARCHIVO HISTÓRICO..."
+                      value={historySearchQuery}
+                      onChange={(e) => setHistorySearchQuery(e.target.value)}
+                      className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-3 py-2 text-[10px] text-white focus:outline-none focus:border-cyberBlue font-sans"
+                    />
+
+                    <div className="max-h-56 overflow-y-auto space-y-3 pr-2">
+                      {filteredCompletedProjects.length === 0 ? (
+                        <span className="font-rajdhani text-xs text-gray-600 block text-center py-5">Ninguna orden completada coincide.</span>
+                      ) : (
+                        filteredCompletedProjects.map((proj, idx) => (
+                          <div key={proj.id_proyecto} className="p-3 border border-white/5 bg-black/40 flex justify-between items-center gap-3">
+                            <div className="truncate">
+                              <div className="flex items-center space-x-1.5">
+                                <span className="font-orbitron text-[9px] text-green-400 font-bold">#{completedProjects.length - idx}</span>
+                                <span className="font-sans text-xs font-semibold text-white truncate max-w-[120px] uppercase">{proj.clientes?.nombre}</span>
+                              </div>
+                              <span className="font-sans text-[10px] text-gray-400 block truncate max-w-[150px] uppercase mt-0.5">{proj.nombre}</span>
+                              <span className="font-orbitron text-[8px] text-gray-600 block mt-1">CLAUSURA: {formatFechaSimple(proj.fecha_completado_real)}</span>
+                            </div>
+
+                            <button
+                              onClick={() => viewGallery(proj.id_proyecto)}
+                              className="w-8 h-8 border border-white/5 hover:border-cyberBlue bg-cyberCard text-gray-400 hover:text-cyberBlue flex items-center justify-center flex-shrink-0 transition"
+                            >
+                              <i data-lucide="image" className="w-4 h-4"></i>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+
+          {/* --- MODALES Y POPUPS OPERATIVOS --- */}
+
+          {/* 1. Modal Ajuste de Fecha */}
+          {rescheduleProjectId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="cyber-card p-6 w-full max-w-sm">
+                <h4 className="font-orbitron text-xs tracking-wider font-bold text-cyberBlue mb-4">REAGENDAR COMPROMISO</h4>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">NUEVA FECHA</label>
+                    <input
+                      type="date"
+                      required
+                      value={newDeliveryDate}
+                      onChange={(e) => setNewDeliveryDate(e.target.value)}
+                      className="w-full bg-cyberDark border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">JUSTIFICACIÓN OBLIGATORIA DEL RETRASO/ADELANTO</label>
+                    <textarea
+                      required
+                      placeholder="JUSTIFICACIÓN QUE SE EXPOSTULARÁ EN LA BITÁCORA DEL CLIENTE..."
+                      value={rescheduleReason}
+                      onChange={(e) => setRescheduleReason(e.target.value)}
+                      className="w-full bg-cyberDark border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans h-20 resize-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button
+                      onClick={submitReschedule}
+                      disabled={!newDeliveryDate || !rescheduleReason}
+                      className="flex-grow py-2.5 bg-cyberBlue text-cyberDark font-rajdhani font-bold text-xs tracking-widest hover:shadow-[0_0_10px_rgba(0,242,254,0.3)] transition disabled:opacity-30 disabled:pointer-events-none rounded-none"
+                    >
+                      REAGENDAR //
+                    </button>
+                    <button
+                      onClick={() => {
+                        setRescheduleProjectId(null);
+                        setNewDeliveryDate('');
+                        setRescheduleReason('');
+                      }}
+                      className="px-4 py-2.5 border border-white/10 hover:bg-white/5 text-gray-400 font-rajdhani text-xs tracking-widest rounded-none"
+                    >
+                      CANCELAR
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 2. Modal Emergente de Marcación de Tarea */}
+          {confirmStepData && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="cyber-card p-6 w-full max-w-sm">
+                <h4 className="font-orbitron text-xs tracking-wider font-bold text-cyberBlue mb-3">ACTUALIZACIÓN DE PROCESO</h4>
+                <p className="font-sans text-xs text-gray-300 leading-relaxed mb-5">
+                  Confirma que este proceso está cumplido. ¿Deseas marcar la tarea <strong className="text-cyberBlue uppercase">"{confirmStepData.name}"</strong> como {confirmStepData.completado ? 'finalizada' : 'pendiente'} con éxito?
+                </p>
+
+                <div className="flex gap-4">
+                  <button
+                    onClick={confirmStepChange}
+                    className="flex-grow py-2.5 bg-gradient-to-r from-cyberBlue to-cyberPurple text-cyberDark font-rajdhani font-bold text-xs tracking-widest hover:-translate-y-0.5 hover:shadow-[0_0_10px_rgba(0,242,254,0.3)] transition rounded-none"
+                  >
+                    SÍ, ENVIAR REGISTRO //
+                  </button>
+                  <button
+                    onClick={() => setConfirmStepData(null)}
+                    className="px-4 py-2.5 border border-white/10 hover:bg-white/5 text-gray-400 font-rajdhani text-xs tracking-widest rounded-none"
+                  >
+                    CANCELAR
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3. Modal Inyección de Tarea Especial */}
+          {extraStepProjectId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="cyber-card p-6 w-full max-w-sm">
+                <h4 className="font-orbitron text-xs tracking-wider font-bold text-cyberPurple mb-4">ACOPLAR OPERACIÓN ESPECIAL</h4>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">NOMBRE DE LA OPERACIÓN</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="EJ: LIJADO EXTRA DE ACABADO"
+                      value={extraStepName}
+                      onChange={(e) => setExtraStepName(e.target.value)}
+                      className="w-full bg-cyberDark border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">DURACIÓN ESTIMADA (HORAS)</label>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      placeholder="EJ: 3"
+                      value={extraStepHours}
+                      onChange={(e) => setExtraStepHours(e.target.value)}
+                      className="w-full bg-cyberDark border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                    />
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button
+                      onClick={submitExtraStep}
+                      disabled={!extraStepName || !extraStepHours}
+                      className="flex-grow py-2.5 bg-cyberPurple text-cyberDark font-rajdhani font-bold text-xs tracking-widest hover:shadow-[0_0_10px_rgba(157,78,237,0.3)] transition disabled:opacity-30 disabled:pointer-events-none rounded-none"
+                    >
+                      ACOPLAR //
+                    </button>
+                    <button
+                      onClick={() => {
+                        setExtraStepProjectId(null);
+                        setExtraStepName('');
+                        setExtraStepHours('');
+                      }}
+                      className="px-4 py-2.5 border border-white/10 hover:bg-white/5 text-gray-400 font-rajdhani text-xs tracking-widest rounded-none"
+                    >
+                      CANCELAR
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 4. Modal Creación de Categoría al Vuelo */}
+          {showNewCategoryModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="cyber-card p-6 w-full max-w-sm">
+                <h4 className="font-orbitron text-xs tracking-wider font-bold text-cyberBlue mb-4 font-black">NUEVA CATEGORÍA DE TALLER</h4>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block font-rajdhani text-[10px] font-semibold text-gray-400 mb-1">NOMBRE DE LA CLASIFICACIÓN</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="EJ: MÁSCARA, MUEBLERÍA, WEB"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      className="w-full bg-cyberDark border border-white/10 rounded-none px-3 py-2 text-xs text-white focus:outline-none focus:border-cyberBlue font-sans"
+                    />
+                  </div>
+
+                  <div className="flex gap-4">
+                    <button
+                      onClick={submitNewCategory}
+                      disabled={!newCategoryName}
+                      className="flex-grow py-2.5 bg-cyberBlue text-cyberDark font-rajdhani font-bold text-xs tracking-widest hover:shadow-[0_0_10px_rgba(0,242,254,0.3)] transition disabled:opacity-30 disabled:pointer-events-none rounded-none"
+                    >
+                      CREAR //
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowNewCategoryModal(false);
+                        setNewCategoryName('');
+                      }}
+                      className="px-4 py-2.5 border border-white/10 hover:bg-white/5 text-gray-400 font-rajdhani text-xs tracking-widest rounded-none"
+                    >
+                      CANCELAR
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 5. Modal Galería de Evidencias (Control de Calidad) */}
+          {selectedGalleryProjId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+              <div className="cyber-card p-6 w-full max-w-lg">
+                <div className="flex justify-between items-center mb-5 border-b border-white/5 pb-2">
+                  <h4 className="font-orbitron text-xs tracking-wider font-bold text-cyberBlue">GALERÍA DE EVIDENCIA OPERATIVA</h4>
+                  <button
+                    onClick={() => {
+                      setSelectedGalleryProjId(null);
+                      setGalleryPhotos([]);
+                    }}
+                    className="text-gray-500 hover:text-cyberPink transition"
+                  >
+                    <i data-lucide="x" className="w-5 h-5"></i>
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  {/* Grid de imágenes */}
+                  <div className="grid grid-cols-5 gap-3 h-28 items-center bg-black/40 border border-white/5 p-3">
+                    {[...Array(5)].map((_, index) => {
+                      const photo = galleryPhotos[index];
+                      return (
+                        <div key={index} className="aspect-square border border-dashed border-white/10 relative group overflow-hidden flex items-center justify-center bg-cyberDark">
+                          {photo ? (
+                            <React.Fragment>
+                              <img src={photo.url_imagen} className="object-cover w-full h-full" alt="Evidencia" />
+                              <button
+                                onClick={() => deletePhoto(photo.id_foto, photo.url_imagen)}
+                                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-cyberPink transition duration-200"
+                              >
+                                <i data-lucide="trash-2" className="w-4 h-4"></i>
+                              </button>
+                            </React.Fragment>
+                          ) : (
+                            <span className="text-[10px] font-orbitron text-gray-700 font-bold">SLOT</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Panel de Carga */}
+                  {galleryPhotos.length < 5 ? (
+                    <div>
+                      <label className="border border-dashed border-cyberPurple/30 bg-cyberPurple/5 hover:bg-cyberPurple/10 px-4 py-3 text-xs font-rajdhani tracking-wider text-cyberPurple hover:text-white transition duration-200 flex items-center justify-center space-x-2 cursor-pointer rounded-none">
+                        <i data-lucide="upload-cloud" className="w-4 h-4"></i>
+                        <span>CARGAR FOTO DE EVIDENCIA ({galleryPhotos.length}/5)</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePhotoUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="p-3 border border-cyberPink/20 bg-cyberPink/5 text-cyberPink text-[10px] font-orbitron text-center uppercase">
+                      Límite de 5 fotos de control de calidad alcanzado para este proyecto.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<ColaboradorApp />);
+  </script>
+</body>
+</html>

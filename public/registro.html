@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alta Colaborador - OrgaProp</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyberDark: '#09090e',
+            cyberCard: '#13131a',
+            cyberBlue: '#00f2fe',
+            cyberPurple: '#9d4edd',
+            cyberPink: '#ff007f'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Estilos Cyberpunk Personalizados -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap');
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #09090e;
+      color: #ffffff;
+      overflow-x: hidden;
+    }
+
+    .font-orbitron {
+      font-family: 'Orbitron', sans-serif;
+    }
+    
+    .font-rajdhani {
+      font-family: 'Rajdhani', sans-serif;
+    }
+
+    /* Cuadrícula de Fondo */
+    .bg-grid {
+      background-image: 
+        linear-gradient(to right, rgba(0, 242, 254, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 242, 254, 0.03) 1px, transparent 1px);
+      background-size: 30px 30px;
+    }
+
+    /* Línea Scanline */
+    .scanline {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: rgba(0, 242, 254, 0.08);
+      z-index: 50;
+      pointer-events: none;
+      animation: scanlineAnim 6s linear infinite;
+    }
+
+    @keyframes scanlineAnim {
+      0% { top: -10px; }
+      100% { top: 100%; }
+    }
+
+    /* Animación parpadeo de terminal */
+    .terminal-blink {
+      animation: blink 1.5s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Tarjeta Ciberpunk con Corchetes */
+    .cyber-card {
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(19, 19, 26, 0.75);
+      backdrop-filter: blur(12px);
+    }
+
+    .cyber-card::before {
+      content: '';
+      position: absolute;
+      top: -1px;
+      left: -1px;
+      width: 12px;
+      height: 12px;
+      border-top: 2px solid #00f2fe;
+      border-left: 2px solid #00f2fe;
+    }
+
+    .cyber-card::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      right: -1px;
+      width: 12px;
+      height: 12px;
+      border-bottom: 2px solid #9d4edd;
+      border-right: 2px solid #9d4edd;
+    }
+
+    .neon-border-blue:focus {
+      border-color: #00f2fe;
+      box-shadow: 0 0 15px rgba(0, 242, 254, 0.4), 0 0 30px rgba(0, 242, 254, 0.2);
+    }
+
+    /* Plan power cell selector style */
+    .plan-card {
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+    .plan-card.active {
+      border-color: #00f2fe;
+      background: rgba(0, 242, 254, 0.05);
+      box-shadow: inset 0 0 10px rgba(0, 242, 254, 0.2), 0 0 10px rgba(0, 242, 254, 0.1);
+    }
+  </style>
+
+  <!-- React y Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- SDK de Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="relative min-h-screen flex items-center justify-center bg-cyberDark py-12">
+
+  <!-- Capas de fondo ambientación -->
+  <div class="absolute inset-0 bg-grid z-0"></div>
+  <div class="scanline"></div>
+
+  <!-- Destellos de luz radiales -->
+  <div class="absolute top-0 left-0 w-96 h-96 bg-[radial-gradient(circle,_rgba(0,242,254,0.06)_0%,_transparent_70%)] pointer-events-none"></div>
+  <div class="absolute bottom-0 right-0 w-96 h-96 bg-[radial-gradient(circle,_rgba(157,78,237,0.06)_0%,_transparent_70%)] pointer-events-none"></div>
+
+  <div id="root" class="relative z-10 w-full max-w-lg px-4"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function RegistroApp() {
+      const [supabaseClient, setSupabaseClient] = useState(null);
+      const [rubros, setRubros] = useState([]);
+      const [planes, setPlanes] = useState([]);
+      
+      // Form fields
+      const [nombre, setNombre] = useState('');
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [idRubro, setIdRubro] = useState('');
+      const [idPlan, setIdPlan] = useState('');
+
+      const [loading, setLoading] = useState(false);
+      const [errorMsg, setErrorMsg] = useState('');
+      const [successMsg, setSuccessMsg] = useState('');
+
+      // Cargar configuraciones del backend e inicializar Supabase
+      useEffect(() => {
+        async function init() {
+          try {
+            const res = await fetch('/api/config');
+            if (res.ok) {
+              const config = await res.json();
+              if (config.supabaseUrl && config.supabaseAnonKey) {
+                const client = supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+                setSupabaseClient(client);
+                
+                // Fetch Rubros y Planes
+                const { data: rubrosData } = await client
+                  .from('rubros')
+                  .select('*')
+                  .order('nombre', { ascending: true });
+                
+                const { data: planesData } = await client
+                  .from('planes')
+                  .select('*')
+                  .order('precio', { ascending: true });
+                
+                if (rubrosData) setRubros(rubrosData);
+                if (planesData) setPlanes(planesData);
+                return;
+              }
+            }
+          } catch (e) {
+            console.error('Error inicializando registro:', e);
+          }
+          setErrorMsg('ERROR DE SISTEMA: No se pudo conectar al motor de base de datos.');
+        }
+        init();
+      }, []);
+
+      // Re-inicializar iconos de Lucide
+      useEffect(() => {
+        if (typeof lucide !== 'undefined') {
+          lucide.createIcons();
+        }
+      }, [rubros, planes, loading, errorMsg, successMsg, idPlan]);
+
+      // Formulario completo e inicio del proceso transaccional
+      const handleRegister = async (e) => {
+        e.preventDefault();
+        if (!supabaseClient) return;
+
+        if (!nombre || !email || !password || !idRubro || !idPlan) {
+          setErrorMsg('ERROR: TODOS LOS CAMPOS SON OBLIGATORIOS.');
+          return;
+        }
+
+        if (password.length < 6) {
+          setErrorMsg('ERROR: LA CONTRASEÑA DEBE TENER AL MENOS 6 CARACTERES.');
+          return;
+        }
+
+        setLoading(true);
+        setErrorMsg('');
+        setSuccessMsg('');
+
+        try {
+          // 1. Crear usuario en Supabase Auth
+          const { data: authData, error: authError } = await supabaseClient.auth.signUp({
+            email,
+            password
+          });
+
+          // Si el correo ya existe, Supabase devuelve error o no crea user
+          if (authError) {
+            if (authError.message.toLowerCase().includes('already registered') || authError.status === 422) {
+              setErrorMsg('ERROR: EL CORREO ELECTRÓNICO YA SE ENCUENTRA REGISTRADO EN EL SISTEMA.');
+            } else {
+              setErrorMsg(`ERROR: ${authError.message.toUpperCase()}`);
+            }
+            setLoading(false);
+            return;
+          }
+
+          if (authData?.user) {
+            // Calcular fecha de vencimiento inicial del plan (Ej: 30 días para planes mensuales, o nula para lifetime)
+            const selectedPlanObj = planes.find(p => p.id_plan === idPlan);
+            let fechaVencimiento = null;
+            if (selectedPlanObj && selectedPlanObj.nombre.toLowerCase().includes('mensual')) {
+              const d = new Date();
+              d.setDate(d.getDate() + 30);
+              fechaVencimiento = d.toISOString();
+            } else if (selectedPlanObj && selectedPlanObj.nombre.toLowerCase().includes('anual')) {
+              const d = new Date();
+              d.setDate(d.getDate() + 365);
+              fechaVencimiento = d.toISOString();
+            }
+
+            // 2. Insertar perfil en la tabla de colaboradores
+            const { error: profileError } = await supabaseClient
+              .from('colaboradores')
+              .insert([{
+                id_colaborador: authData.user.id,
+                id_plan: idPlan,
+                id_rubro: idRubro,
+                nombre: nombre,
+                correo: email,
+                es_admin: false,
+                activo: true,
+                fecha_vencimiento_plan: fechaVencimiento
+              }]);
+
+            if (profileError) {
+              // Si falla insertar perfil, intentamos borrar la sesión creada para limpiar
+              console.error('Error al insertar perfil colaborador:', profileError);
+              setErrorMsg(`ERROR PERFIL: ${profileError.message.toUpperCase()}`);
+            } else {
+              setSuccessMsg('ALTA COMPLETADA CON ÉXITO. REDIRIGIENDO AL ACCESO...');
+              setTimeout(() => {
+                window.location.href = 'login.html';
+              }, 2000);
+            }
+          }
+        } catch (err) {
+          setErrorMsg('ERROR CRÍTICO AL PROCESAR EL REGISTRO.');
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Verificar si el formulario es válido
+      const isFormValid = nombre && email && password.length >= 6 && idRubro && idPlan;
+
+      return (
+        <div className="cyber-card w-full p-8 shadow-2xl">
+          {/* LOGO DE CABECERA */}
+          <div className="text-center mb-6">
+            <h1 className="font-orbitron text-2xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyberBlue via-white to-cyberPurple">
+              ORGAPROP
+            </h1>
+            <p className="font-rajdhani text-xs tracking-widest text-cyberPurple font-semibold mt-1">
+              DAR DE ALTA CUENTA //
+            </p>
+          </div>
+
+          {/* ALERTA DE ERROR */}
+          {errorMsg && (
+            <div className="mb-6 p-4 border border-cyberPink bg-cyberPink/10 text-cyberPink text-xs font-orbitron flex items-center space-x-2 animate-pulse rounded-none">
+              <i data-lucide="alert-triangle" className="w-4 h-4 flex-shrink-0"></i>
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* ALERTA DE ÉXITO */}
+          {successMsg && (
+            <div className="mb-6 p-4 border border-cyberBlue bg-cyberBlue/10 text-cyberBlue text-xs font-orbitron flex items-center space-x-2 rounded-none">
+              <i data-lucide="check-circle" className="w-4 h-4 flex-shrink-0"></i>
+              <span>{successMsg}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleRegister} className="space-y-5">
+            {/* NOMBRE DE LA FIRMA */}
+            <div>
+              <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400 mb-1.5">
+                NOMBRE DE LA FIRMA / NEGOCIO
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="EJ: TALLER AIRTEC"
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+                className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-2 text-sm text-white focus:outline-none neon-border-blue transition duration-300 font-sans"
+              />
+            </div>
+
+            {/* CORREO Y CONTRASEÑA */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400 mb-1.5">
+                  CORREO ELECTRÓNICO
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="COLLAB@ORGAPROP.COM"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-2 text-sm text-white focus:outline-none neon-border-blue transition duration-300 font-sans uppercase placeholder:text-gray-700"
+                />
+              </div>
+
+              <div>
+                <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400 mb-1.5">
+                  CONTRASEÑA (MÍN. 6 CARACTERES)
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-2 text-sm text-white focus:outline-none neon-border-blue transition duration-300 font-sans"
+                />
+              </div>
+            </div>
+
+            {/* RUBRO COMERCIAL */}
+            <div>
+              <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400 mb-1.5">
+                RUBRO COMERCIAL / SECTOR PROFESIONAL
+              </label>
+              <div className="relative">
+                <select
+                  required
+                  value={idRubro}
+                  onChange={(e) => setIdRubro(e.target.value)}
+                  className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-2 text-sm text-white focus:outline-none focus:border-cyberBlue focus:shadow-[0_0_15px_rgba(0,242,254,0.4)] transition duration-300 font-sans appearance-none"
+                >
+                  <option value="" disabled className="bg-cyberDark">-- SELECCIONA TU RUBRO --</option>
+                  {rubros.map((rubro) => (
+                    <option key={rubro.id_rubro} value={rubro.id_rubro} className="bg-cyberDark">
+                      {rubro.nombre.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute right-3 top-3 pointer-events-none text-gray-500">
+                  <i data-lucide="chevron-down" className="w-4 h-4"></i>
+                </div>
+              </div>
+            </div>
+
+            {/* SELECCIÓN DE PLAN COMERCIAL */}
+            <div>
+              <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400 mb-2">
+                SELECCIONA UNA MODALIDAD DE PLAN
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {planes.map((plan) => (
+                  <div
+                    key={plan.id_plan}
+                    onClick={() => setIdPlan(plan.id_plan)}
+                    className={`plan-card p-4 rounded-none flex flex-col justify-between h-24 relative ${idPlan === plan.id_plan ? 'active' : ''}`}
+                  >
+                    <div className="font-orbitron text-[10px] tracking-wider text-gray-400 font-bold">
+                      {plan.nombre.toUpperCase()}
+                    </div>
+                    <div className="flex justify-between items-end">
+                      <span className="font-orbitron text-lg font-bold text-cyberBlue">
+                        ${plan.precio}
+                      </span>
+                      <span className="font-rajdhani text-[10px] text-gray-500">
+                        {plan.limite_proyectos === 9999 ? 'ILIMITADO' : `${plan.limite_proyectos} PROYS`}
+                      </span>
+                    </div>
+                    {idPlan === plan.id_plan && (
+                      <div className="absolute top-1 right-1 w-2 h-2 bg-cyberBlue"></div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* BOTÓN DE ACCIÓN */}
+            <button
+              type="submit"
+              disabled={!isFormValid || loading}
+              className={`w-full py-4 bg-gradient-to-r from-cyberBlue to-cyberPurple text-cyberDark font-rajdhani font-bold tracking-widest text-sm transition duration-300 rounded-none flex justify-center items-center ${isFormValid && !loading ? 'hover:-translate-y-0.5 hover:shadow-[0_0_15px_rgba(0,242,254,0.4)] cursor-pointer' : 'opacity-30 pointer-events-none'}`}
+            >
+              {loading ? (
+                <span className="terminal-blink flex items-center">
+                  <i data-lucide="loader-2" className="w-4 h-4 mr-2 animate-spin"></i>
+                  PROCESANDO ALTA DE SOCIO...
+                </span>
+              ) : (
+                <span>DAR DE ALTA CUENTA //</span>
+              )}
+            </button>
+
+            <div className="text-center pt-1">
+              <span className="font-rajdhani text-xs text-gray-500">
+                ¿YA TIENES CUENTA?{' '}
+                <a href="login.html" className="text-cyberPurple hover:underline font-semibold">
+                  INICIA SESIÓN AQUÍ
+                </a>
+              </span>
+            </div>
+          </form>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<RegistroApp />);
+  </script>
+</body>
+</html>

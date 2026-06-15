@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Auditoría Proyectos - OrgaProp</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyberDark: '#09090e',
+            cyberCard: '#13131a',
+            cyberBlue: '#00f2fe',
+            cyberPurple: '#9d4edd',
+            cyberPink: '#ff007f'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Estilos Cyberpunk Personalizados -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap');
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #09090e;
+      color: #ffffff;
+      overflow-x: hidden;
+    }
+
+    .font-orbitron {
+      font-family: 'Orbitron', sans-serif;
+    }
+    
+    .font-rajdhani {
+      font-family: 'Rajdhani', sans-serif;
+    }
+
+    /* Cuadrícula de Fondo */
+    .bg-grid {
+      background-image: 
+        linear-gradient(to right, rgba(0, 242, 254, 0.02) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 242, 254, 0.02) 1px, transparent 1px);
+      background-size: 30px 30px;
+    }
+
+    /* Línea Scanline */
+    .scanline {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: rgba(0, 242, 254, 0.05);
+      z-index: 50;
+      pointer-events: none;
+      animation: scanlineAnim 6s linear infinite;
+    }
+
+    @keyframes scanlineAnim {
+      0% { top: -10px; }
+      100% { top: 100%; }
+    }
+
+    /* Tarjeta Ciberpunk con Corchetes */
+    .cyber-card {
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(19, 19, 26, 0.85);
+      backdrop-filter: blur(8px);
+    }
+
+    .cyber-card::before {
+      content: '';
+      position: absolute;
+      top: -1px;
+      left: -1px;
+      width: 10px;
+      height: 10px;
+      border-top: 2px solid #00f2fe;
+      border-left: 2px solid #00f2fe;
+    }
+
+    .cyber-card::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      right: -1px;
+      width: 10px;
+      height: 10px;
+      border-bottom: 2px solid #9d4edd;
+      border-right: 2px solid #9d4edd;
+    }
+
+    .terminal-blink {
+      animation: blink 1.5s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+  </style>
+
+  <!-- React y Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- SDK de Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="relative min-h-screen bg-cyberDark">
+
+  <!-- Capas de fondo ambientación -->
+  <div class="absolute inset-0 bg-grid z-0"></div>
+  <div class="scanline"></div>
+
+  <!-- Contenedor Principal SPA -->
+  <div id="root" class="relative z-10 w-full min-h-screen flex flex-col justify-between"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function AdminAuditApp() {
+      const [supabaseClient, setSupabaseClient] = useState(null);
+      const [trackingCode, setTrackingCode] = useState('');
+      const [projectData, setProjectData] = useState(null);
+      const [showConfirmDelete, setShowConfirmDelete] = useState(false);
+
+      const [loading, setLoading] = useState(false);
+      const [errorMsg, setErrorMsg] = useState('');
+      const [successMsg, setSuccessMsg] = useState('');
+
+      // Autenticación de súper administrador
+      useEffect(() => {
+        async function checkAdminSession() {
+          try {
+            const res = await fetch('/api/config');
+            if (!res.ok) {
+              window.location.href = '../login.html';
+              return;
+            }
+            const config = await res.json();
+            const client = supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+            setSupabaseClient(client);
+
+            const { data: { session } } = await client.auth.getSession();
+            if (!session) {
+              window.location.href = '../login.html';
+              return;
+            }
+
+            const { data: collab } = await client
+              .from('colaboradores')
+              .select('es_admin, activo')
+              .eq('id_colaborador', session.user.id)
+              .single();
+
+            if (!collab || !collab.es_admin || !collab.activo) {
+              alert('ACCESO DENEGADO: Requiere privilegios de Súper Administrador.');
+              window.location.href = '../login.html';
+              return;
+            }
+          } catch (e) {
+            console.error(e);
+            window.location.href = '../login.html';
+          }
+        }
+        checkAdminSession();
+      }, []);
+
+      // Re-inicializar iconos de Lucide
+      useEffect(() => {
+        if (typeof lucide !== 'undefined') {
+          lucide.createIcons();
+        }
+      }, [projectData, loading, showConfirmDelete, errorMsg]);
+
+      // Consultar proyecto
+      const handleSearch = async (e) => {
+        e.preventDefault();
+        if (trackingCode.length !== 5) return;
+
+        setLoading(true);
+        setErrorMsg('');
+        setProjectData(null);
+
+        try {
+          const res = await fetch(`/api/proyectos/seguimiento/${trackingCode.toUpperCase()}`);
+          const data = await res.json();
+
+          if (!res.ok) {
+            setErrorMsg(data.error || 'Código no encontrado en el sistema.');
+          } else {
+            setProjectData(data);
+          }
+        } catch (err) {
+          setErrorMsg('Error de red al buscar el proyecto.');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Purgar proyecto (borrado físico total)
+      const handleDeleteProject = async () => {
+        if (!projectData) return;
+        setLoading(true);
+        setShowConfirmDelete(false);
+
+        try {
+          const res = await fetch(`/api/admin/proyectos/${projectData.proyecto.id_proyecto}`, {
+            method: 'DELETE'
+          });
+
+          if (res.ok) {
+            alert('Proyecto purgado exitosamente de la base de datos.');
+            setProjectData(null);
+            setTrackingCode('');
+          } else {
+            const err = await res.json();
+            alert(`Error al purgar: ${err.error}`);
+          }
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const formatFecha = (fechaStr) => {
+        if (!fechaStr) return 'No definida';
+        const date = new Date(fechaStr + 'T00:00:00');
+        return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      };
+
+      return (
+        <React.Fragment>
+          {/* BARRA DE NAVEGACIÓN */}
+          <nav className="relative z-10 w-full px-6 py-4 flex justify-between items-center border-b border-white/5 bg-cyberCard/90 backdrop-blur-md">
+            <div className="font-orbitron font-bold text-sm tracking-wider flex items-center space-x-2">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyberBlue to-cyberPurple">ORGAPROP</span>
+              <span className="text-white">/</span>
+              <span className="text-cyberBlue text-xs font-black">PANEL CONTROL DIOS</span>
+            </div>
+
+            <div className="flex items-center space-x-6 font-rajdhani text-xs font-bold tracking-widest">
+              <a href="dashboard.html" className="text-gray-400 hover:text-white transition">MÉTRICAS</a>
+              <a href="usuarios.html" className="text-gray-400 hover:text-white transition">COLABORADORES</a>
+              <a href="proyectos.html" className="text-cyberBlue underline">AUDITORÍA</a>
+              <a href="../colaboradores.html" className="text-cyberPurple border border-cyberPurple/20 bg-cyberPurple/5 px-3 py-1.5 hover:bg-cyberPurple hover:text-cyberDark transition">
+                VOLVER AL TALLER
+              </a>
+            </div>
+          </nav>
+
+          {/* CUERPO CENTRAL */}
+          <div className="flex-grow max-w-4xl w-full mx-auto p-6 space-y-6">
+            
+            <div className="flex justify-between items-center pb-2 border-b border-white/5">
+              <h2 className="font-orbitron text-sm tracking-widest font-black text-gray-400">
+                AUDITORÍA DE PIPELINES & PURGA
+              </h2>
+              <span className="font-rajdhani text-[10px] text-cyberPink font-bold">HERRAMIENTAS CRÍTICAS DE BORRADO</span>
+            </div>
+
+            {/* BUSCADOR DE AUDITORÍA */}
+            <div className="w-full max-w-md mx-auto">
+              <form onSubmit={handleSearch} className="cyber-card p-5 flex gap-4">
+                <input
+                  type="text"
+                  maxLength={5}
+                  required
+                  placeholder="CÓDIGO DE 5 DÍGITOS..."
+                  value={trackingCode}
+                  onChange={(e) => setTrackingCode(e.target.value.toUpperCase())}
+                  className="flex-grow bg-cyberDark/80 border border-white/10 rounded-none px-4 py-3 text-center font-orbitron text-sm tracking-widest text-cyberBlue focus:outline-none focus:border-cyberBlue font-sans"
+                />
+                <button
+                  type="submit"
+                  disabled={trackingCode.length !== 5 || loading}
+                  className={`px-5 py-3 font-rajdhani font-bold text-xs tracking-widest transition rounded-none flex items-center space-x-2 ${
+                    trackingCode.length === 5 && !loading
+                      ? 'bg-gradient-to-r from-cyberBlue to-cyberPurple text-cyberDark hover:shadow-[0_0_10px_rgba(0,242,254,0.3)] cursor-pointer'
+                      : 'bg-white/5 text-gray-500 opacity-50 pointer-events-none'
+                  }`}
+                >
+                  <i data-lucide="search" className="w-4 h-4"></i>
+                  <span>AUDITAR //</span>
+                </button>
+              </form>
+
+              {errorMsg && (
+                <div className="mt-4 p-3 border border-cyberPink bg-cyberPink/10 text-cyberPink text-[10px] font-orbitron flex items-center space-x-2 animate-pulse rounded-none">
+                  <i data-lucide="alert-triangle" className="w-3.5 h-3.5 flex-shrink-0"></i>
+                  <span>{errorMsg.toUpperCase()}</span>
+                </div>
+              )}
+            </div>
+
+            {loading && !projectData && (
+              <div className="text-center py-20 font-orbitron text-cyberBlue text-xs tracking-widest font-black terminal-blink">
+                CONECTANDO A LA CENTRAL...
+              </div>
+            )}
+
+            {/* DETALLES DE AUDITORÍA Y FICHA DE PROYECTO */}
+            {!loading && projectData && (
+              <div className="cyber-card p-6 md:p-8 space-y-6 animate-fade-in">
+                
+                {/* Cabecera de Auditoría */}
+                <div className="flex justify-between items-start border-b border-white/5 pb-4">
+                  <div>
+                    <span className="font-orbitron text-[10px] text-cyberPink font-black tracking-wider block">CONSOLA DIOS // AUDITORÍA DE REGISTRO</span>
+                    <h3 className="font-orbitron text-base font-bold text-white uppercase mt-1">
+                      {projectData.proyecto.nombre} ({projectData.proyecto.codigo_seguimiento})
+                    </h3>
+                  </div>
+
+                  {/* BOTÓN PURGAR */}
+                  <button
+                    onClick={() => setShowConfirmDelete(true)}
+                    className="px-4 py-2 bg-cyberPink text-white font-rajdhani font-bold text-xs tracking-widest hover:bg-red-700 hover:shadow-[0_0_10px_rgba(255,0,127,0.3)] transition rounded-none"
+                  >
+                    ELIMINAR FÍSICAMENTE //
+                  </button>
+                </div>
+
+                {/* Metadatos detallados */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 border border-white/5 bg-black/40">
+                  <div>
+                    <span className="font-rajdhani text-[9px] text-gray-500 font-bold block uppercase">Dueño / Colaborador</span>
+                    <span className="font-sans text-xs text-white uppercase font-bold block mt-0.5">{projectData.proyecto.colaborador_nombre}</span>
+                  </div>
+                  <div>
+                    <span className="font-rajdhani text-[9px] text-gray-500 font-bold block uppercase">Avance Registrado</span>
+                    <span className="font-orbitron text-xs text-cyberBlue font-black block mt-0.5">{projectData.proyecto.porcentaje_avance}%</span>
+                  </div>
+                  <div>
+                    <span className="font-rajdhani text-[9px] text-gray-500 font-bold block uppercase">Lugar en Fila</span>
+                    <span className="font-orbitron text-xs text-cyberPurple font-black block mt-0.5">{projectData.proyecto.orden_lista}</span>
+                  </div>
+                  <div>
+                    <span className="font-rajdhani text-[9px] text-gray-500 font-bold block uppercase">Entrega Comprometida</span>
+                    <span className="font-sans text-xs text-white block mt-0.5">
+                      {formatFecha(projectData.proyecto.fecha_entrega_manual || projectData.proyecto.fecha_entrega_calculada)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Checklist e Historial de notas */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                  <div className="space-y-3">
+                    <span className="font-rajdhani text-[10px] text-gray-400 font-bold tracking-widest uppercase block">Checklist Operacional</span>
+                    <div className="border border-white/5 bg-black/20 max-h-48 overflow-y-auto divide-y divide-white/5">
+                      {projectData.pasos.map(p => (
+                        <div key={p.id_paso} className="p-2.5 flex justify-between text-xs items-center">
+                          <span className={`${p.completado ? 'text-gray-400 line-through' : 'text-white'}`}>{p.numero_paso}. {p.descripcion}</span>
+                          <span className="font-rajdhani text-[10px] text-gray-500">{p.completado ? 'CUMPLIDO ✅' : 'PENDIENTE'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <span className="font-rajdhani text-[10px] text-gray-400 font-bold tracking-widest uppercase block">Historial de Bitácora y Notas</span>
+                    <div className="border border-white/5 bg-black/20 max-h-48 overflow-y-auto p-3 space-y-3">
+                      {projectData.notas.length === 0 ? (
+                        <span className="font-rajdhani text-xs text-gray-600 block">No hay notas registradas.</span>
+                      ) : (
+                        projectData.notas.map(n => (
+                          <div key={n.id_nota} className="text-[11px] leading-normal border-l border-white/10 pl-3">
+                            <span className="font-orbitron text-[8px] text-cyberPurple font-bold block">{new Date(n.fecha_registro).toLocaleDateString()} - {n.tipo_nota.toUpperCase()}</span>
+                            <p className="text-gray-400 font-sans mt-0.5">{n.nota}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+          </div>
+
+          {/* CONFIRMACIÓN DE ELIMINACIÓN */}
+          {showConfirmDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4">
+              <div className="cyber-card p-6 w-full max-w-sm border-cyberPink">
+                <h4 className="font-orbitron text-xs tracking-wider font-bold text-cyberPink mb-3 flex items-center space-x-1">
+                  <i data-lucide="alert-octagon" className="w-4 h-4"></i>
+                  <span>ELIMINACIÓN CRÍTICA EN CASCADA</span>
+                </h4>
+                <p className="font-sans text-xs text-gray-300 leading-relaxed mb-5">
+                  Estás a punto de borrar físicamente el proyecto de forma irreversible del sistema. Esto destruirá sus pasos, fotos y bitácoras asociadas. ¿Deseas proceder?
+                </p>
+
+                <div className="flex gap-4">
+                  <button
+                    onClick={handleDeleteProject}
+                    className="flex-grow py-2.5 bg-cyberPink text-white font-rajdhani font-bold text-xs tracking-widest hover:bg-red-700 hover:shadow-[0_0_10px_rgba(255,0,127,0.3)] transition rounded-none"
+                  >
+                    SÍ, ELIMINAR REGISTRO //
+                  </button>
+                  <button
+                    onClick={() => setShowConfirmDelete(false)}
+                    className="px-4 py-2.5 border border-white/10 hover:bg-white/5 text-gray-400 font-rajdhani text-xs tracking-widest rounded-none"
+                  >
+                    CANCELAR
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </React.Fragment>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<AdminAuditApp />);
+  </script>
+</body>
+</html>

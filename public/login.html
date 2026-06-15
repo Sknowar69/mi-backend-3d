@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Acceso Sistema - OrgaProp</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cyberDark: '#09090e',
+            cyberCard: '#13131a',
+            cyberBlue: '#00f2fe',
+            cyberPurple: '#9d4edd',
+            cyberPink: '#ff007f'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Estilos Cyberpunk Personalizados -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap');
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #09090e;
+      color: #ffffff;
+      overflow-x: hidden;
+    }
+
+    .font-orbitron {
+      font-family: 'Orbitron', sans-serif;
+    }
+    
+    .font-rajdhani {
+      font-family: 'Rajdhani', sans-serif;
+    }
+
+    /* Cuadrícula de Fondo */
+    .bg-grid {
+      background-image: 
+        linear-gradient(to right, rgba(0, 242, 254, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(0, 242, 254, 0.03) 1px, transparent 1px);
+      background-size: 30px 30px;
+    }
+
+    /* Línea Scanline */
+    .scanline {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: rgba(0, 242, 254, 0.08);
+      z-index: 50;
+      pointer-events: none;
+      animation: scanlineAnim 6s linear infinite;
+    }
+
+    @keyframes scanlineAnim {
+      0% { top: -10px; }
+      100% { top: 100%; }
+    }
+
+    /* Animación parpadeo de terminal */
+    .terminal-blink {
+      animation: blink 1.5s ease-in-out infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Tarjeta Ciberpunk con Corchetes */
+    .cyber-card {
+      position: relative;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(19, 19, 26, 0.75);
+      backdrop-filter: blur(12px);
+    }
+
+    .cyber-card::before {
+      content: '';
+      position: absolute;
+      top: -1px;
+      left: -1px;
+      width: 12px;
+      height: 12px;
+      border-top: 2px solid #00f2fe;
+      border-left: 2px solid #00f2fe;
+    }
+
+    .cyber-card::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      right: -1px;
+      width: 12px;
+      height: 12px;
+      border-bottom: 2px solid #9d4edd;
+      border-right: 2px solid #9d4edd;
+    }
+
+    .neon-border-blue:focus {
+      border-color: #00f2fe;
+      box-shadow: 0 0 15px rgba(0, 242, 254, 0.4), 0 0 30px rgba(0, 242, 254, 0.2);
+    }
+  </style>
+
+  <!-- React y Babel CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- SDK de Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="relative min-h-screen flex items-center justify-center bg-cyberDark">
+
+  <!-- Capas de fondo ambientación -->
+  <div class="absolute inset-0 bg-grid z-0"></div>
+  <div class="scanline"></div>
+
+  <!-- Destellos de luz radiales -->
+  <div class="absolute top-0 left-0 w-96 h-96 bg-[radial-gradient(circle,_rgba(0,242,254,0.06)_0%,_transparent_70%)] pointer-events-none"></div>
+  <div class="absolute bottom-0 right-0 w-96 h-96 bg-[radial-gradient(circle,_rgba(157,78,237,0.06)_0%,_transparent_70%)] pointer-events-none"></div>
+
+  <div id="root" class="relative z-10 w-full max-w-md px-4"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function LoginApp() {
+      const [supabaseClient, setSupabaseClient] = useState(null);
+      const [view, setView] = useState('login'); // 'login', 'forgot', 'reset'
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [newPassword, setNewPassword] = useState('');
+      const [showPassword, setShowPassword] = useState(false);
+      
+      const [loading, setLoading] = useState(false);
+      const [errorMsg, setErrorMsg] = useState('');
+      const [successMsg, setSuccessMsg] = useState('');
+
+      // Cargar configuraciones del backend e inicializar Supabase
+      useEffect(() => {
+        async function fetchConfig() {
+          try {
+            const res = await fetch('/api/config');
+            if (res.ok) {
+              const data = await res.json();
+              if (data.supabaseUrl && data.supabaseAnonKey) {
+                const client = supabase.createClient(data.supabaseUrl, data.supabaseAnonKey);
+                setSupabaseClient(client);
+                
+                // Detectar si venimos de un enlace de recuperación de contraseña
+                // Supabase redirige con hash con tipo recovery: #access_token=...&type=recovery
+                // O mediante parámetros query
+                const hash = window.location.hash;
+                const params = new URLSearchParams(window.location.search);
+                if (hash.includes('type=recovery') || params.get('action') === 'reset') {
+                  setView('reset');
+                }
+                return;
+              }
+            }
+          } catch (e) {
+            console.error('Error cargando la configuración del backend:', e);
+          }
+          setErrorMsg('ERROR DE SISTEMA: No se pudo conectar al motor de autenticación. Verifica las variables de entorno.');
+        }
+        fetchConfig();
+      }, []);
+
+      // Re-inicializar iconos de Lucide
+      useEffect(() => {
+        if (typeof lucide !== 'undefined') {
+          lucide.createIcons();
+        }
+      }, [view, showPassword, loading, errorMsg, successMsg]);
+
+      // Manejar inicio de sesión ordinario
+      const handleLogin = async (e) => {
+        e.preventDefault();
+        if (!supabaseClient) return;
+
+        setLoading(true);
+        setErrorMsg('');
+        setSuccessMsg('');
+
+        try {
+          const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email,
+            password
+          });
+
+          if (error) {
+            setErrorMsg('ERROR: ACCESO DENEGADO. VERIFIQUE CORREO O CONTRASEÑA.');
+          } else {
+            // Verificar si el colaborador está activo en la tabla
+            const { data: collab, error: cErr } = await supabaseClient
+              .from('colaboradores')
+              .select('activo')
+              .eq('id_colaborador', data.user.id)
+              .maybeSingle();
+
+            if (collab && !collab.activo) {
+              await supabaseClient.auth.signOut();
+              setErrorMsg('ERROR: CUENTA CONGELADA. COMUNÍQUESE CON EL ADMINISTRADOR.');
+            } else {
+              setSuccessMsg('CONEXIÓN EXITOSA. ACCEDIENDO AL SISTEMA...');
+              setTimeout(() => {
+                window.location.href = 'colaboradores.html';
+              }, 1500);
+            }
+          }
+        } catch (err) {
+          setErrorMsg('ERROR DE CONEXIÓN CON EL SERVIDOR DE AUTENTICACIÓN.');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Solicitar correo de recuperación ("Olvidé mi contraseña")
+      const handleForgotPassword = async (e) => {
+        e.preventDefault();
+        if (!supabaseClient) return;
+
+        setLoading(true);
+        setErrorMsg('');
+        setSuccessMsg('');
+
+        try {
+          const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+            redirectTo: window.location.origin + '/login.html?action=reset'
+          });
+
+          if (error) {
+            setErrorMsg(`ERROR: ${error.message.toUpperCase()}`);
+          } else {
+            setSuccessMsg('ENLACE ENVIADO. REVISE SU CORREO ELECTRÓNICO.');
+            setEmail('');
+          }
+        } catch (err) {
+          setErrorMsg('ERROR AL ENVIAR EL CORREO DE RECUPERACIÓN.');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Establecer nueva contraseña tras hacer clic en enlace de correo
+      const handleResetPassword = async (e) => {
+        e.preventDefault();
+        if (!supabaseClient) return;
+
+        if (newPassword.length < 6) {
+          setErrorMsg('ERROR: LA CONTRASEÑA DEBE TENER AL MENOS 6 CARACTERES.');
+          return;
+        }
+
+        setLoading(true);
+        setErrorMsg('');
+        setSuccessMsg('');
+
+        try {
+          const { error } = await supabaseClient.auth.updateUser({
+            password: newPassword
+          });
+
+          if (error) {
+            setErrorMsg(`ERROR AL ACTUALIZAR: ${error.message.toUpperCase()}`);
+          } else {
+            setSuccessMsg('CONTRASEÑA REESTABLECIDA CON ÉXITO. REDIRIGIENDO...');
+            setTimeout(() => {
+              window.location.href = 'login.html';
+            }, 2000);
+          }
+        } catch (err) {
+          setErrorMsg('ERROR DE RED AL ACTUALIZAR LA CONTRASEÑA.');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="cyber-card w-full p-8 shadow-2xl">
+          {/* LOGO DE CABECERA */}
+          <div className="text-center mb-8">
+            <h1 className="font-orbitron text-2xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyberBlue via-white to-cyberPurple">
+              ORGAPROP
+            </h1>
+            <p className="font-rajdhani text-xs tracking-widest text-cyberBlue font-semibold mt-1">
+              {view === 'login' && 'ACCESO SISTEMA //'}
+              {view === 'forgot' && 'RECUPERACIÓN CREDENCIALES //'}
+              {view === 'reset' && 'RESTABLECER CONTRASEÑA //'}
+            </p>
+          </div>
+
+          {/* BANNERS DE ALERTA */}
+          {errorMsg && (
+            <div className="mb-6 p-4 border border-cyberPink bg-cyberPink/10 text-cyberPink text-xs font-orbitron flex items-center space-x-2 animate-pulse rounded-none">
+              <i data-lucide="alert-triangle" className="w-4 h-4 flex-shrink-0"></i>
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {successMsg && (
+            <div className="mb-6 p-4 border border-cyberBlue bg-cyberBlue/10 text-cyberBlue text-xs font-orbitron flex items-center space-x-2 rounded-none">
+              <i data-lucide="check-circle" className="w-4 h-4 flex-shrink-0"></i>
+              <span>{successMsg}</span>
+            </div>
+          )}
+
+          {/* VISTA: INICIO DE SESIÓN */}
+          {view === 'login' && (
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div>
+                <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400 mb-2">
+                  CORREO ELECTRÓNICO
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="EJ: COLLAB@ORGAPROP.COM"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-3 text-sm text-white focus:outline-none neon-border-blue transition duration-300 font-sans uppercase placeholder:text-gray-600"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400">
+                    CONTRASEÑA
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setView('forgot')}
+                    className="font-rajdhani text-xs text-cyberPurple hover:text-cyberBlue transition font-semibold"
+                  >
+                    ¿OLVIDASTE TU CONTRASEÑA?
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-3 pr-10 text-sm text-white focus:outline-none neon-border-blue transition duration-300 font-sans"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-3.5 text-gray-500 hover:text-cyberBlue transition"
+                  >
+                    <i data-lucide={showPassword ? "eye-off" : "eye"} className="w-4 h-4"></i>
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className={`w-full py-4 bg-gradient-to-r from-cyberBlue to-cyberPurple text-cyberDark font-rajdhani font-bold tracking-widest text-sm hover:-translate-y-0.5 hover:shadow-[0_0_15px_rgba(0,242,254,0.4)] transition duration-300 rounded-none flex justify-center items-center ${loading ? 'pointer-events-none opacity-50' : ''}`}
+              >
+                {loading ? (
+                  <span className="terminal-blink flex items-center">
+                    <i data-lucide="loader-2" className="w-4 h-4 mr-2 animate-spin"></i>
+                    VERIFICANDO CREDENCIALES...
+                  </span>
+                ) : (
+                  <span>INICIAR SESIÓN //</span>
+                )}
+              </button>
+
+              <div className="text-center pt-2">
+                <span className="font-rajdhani text-xs text-gray-500">
+                  ¿NUEVO COLABORADOR?{' '}
+                  <a href="registro.html" className="text-cyberBlue hover:underline font-semibold">
+                    REGÍSTRATE AQUÍ
+                  </a>
+                </span>
+              </div>
+            </form>
+          )}
+
+          {/* VISTA: RECOVERY SOLICITUD */}
+          {view === 'forgot' && (
+            <form onSubmit={handleForgotPassword} className="space-y-6">
+              <div>
+                <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400 mb-2">
+                  CORREO ELECTRÓNICO DE RECUPERACIÓN
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="EJ: COLLAB@ORGAPROP.COM"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-3 text-sm text-white focus:outline-none neon-border-blue transition duration-300 font-sans uppercase placeholder:text-gray-600"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className={`w-full py-4 bg-gradient-to-r from-cyberBlue to-cyberPurple text-cyberDark font-rajdhani font-bold tracking-widest text-sm hover:-translate-y-0.5 hover:shadow-[0_0_15px_rgba(0,242,254,0.4)] transition duration-300 rounded-none flex justify-center items-center ${loading ? 'pointer-events-none opacity-50' : ''}`}
+              >
+                {loading ? (
+                  <span className="terminal-blink flex items-center">
+                    <i data-lucide="loader-2" className="w-4 h-4 mr-2 animate-spin"></i>
+                    ENVIANDO ENLACE...
+                  </span>
+                ) : (
+                  <span>ENVIAR CÓDIGO DE ENLACE //</span>
+                )}
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setView('login')}
+                  className="font-rajdhani text-xs text-cyberBlue hover:underline font-semibold"
+                >
+                  VOLVER AL INICIO DE SESIÓN
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* VISTA: RESTABLECER CONTRASEÑA */}
+          {view === 'reset' && (
+            <form onSubmit={handleResetPassword} className="space-y-6">
+              <div>
+                <label className="block font-rajdhani text-xs font-semibold tracking-wider text-gray-400 mb-2">
+                  NUEVA CONTRASEÑA DE SEGURIDAD
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="MÍNIMO 6 CARACTERES"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full bg-cyberDark/80 border border-white/10 rounded-none px-4 py-3 text-sm text-white focus:outline-none neon-border-blue transition duration-300 font-sans"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className={`w-full py-4 bg-gradient-to-r from-cyberBlue to-cyberPurple text-cyberDark font-rajdhani font-bold tracking-widest text-sm hover:-translate-y-0.5 hover:shadow-[0_0_15px_rgba(0,242,254,0.4)] transition duration-300 rounded-none flex justify-center items-center ${loading ? 'pointer-events-none opacity-50' : ''}`}
+              >
+                {loading ? (
+                  <span className="terminal-blink flex items-center">
+                    <i data-lucide="loader-2" className="w-4 h-4 mr-2 animate-spin"></i>
+                    GUARDANDO CONTRASEÑA...
+                  </span>
+                ) : (
+                  <span>GUARDAR CONTRASEÑA //</span>
+                )}
+              </button>
+            </form>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<LoginApp />);
+  </script>
+</body>
+</html>
