@@ -1,7 +1,7 @@
 {
-  "name": "3d-project-tracker-backend",
+  "name": "orgaprop-backend",
   "version": "1.0.0",
-  "description": "Backend ligero en Node.js y Express para la plataforma de seguimiento de proyectos 3D con cola de producción dinámica.",
+  "description": "Backend para la plataforma SaaS OrgaProp",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
